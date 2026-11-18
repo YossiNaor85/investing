@@ -1,0 +1,27 @@
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+**/.idea/*.iml
+.idea/
+
+
+#folders
+
+#extensions
+.xml
+*.xml
+.iml
+*.iml
+
+#specific files
+vad_test.py
+
+
+
+
