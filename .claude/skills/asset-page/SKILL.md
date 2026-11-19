@@ -19,7 +19,14 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 | `UI/assets.json` | "Your assets", in order (IREN first) |
 | `UI/data/<TICKER>.js` and `.json` | the page's data, rewritten by every run (git-ignored) |
 
-`<slug>` is the ticker in lowercase, with other characters turned into `_` (BRK-B → `brk_b`). The page itself is the shared `UI/index.html`, which shows any registered ticker.
+`<slug>` is the ticker in lowercase, with other characters turned into `_` (BRK-B → `brk_b`). The page itself is the shared `UI/index.html`, which shows any registered ticker:
+
+| Address | What it shows |
+|---|---|
+| `#<TICKER>` | the asset's first page: headline tiles, plus a box for each section |
+| `#<TICKER>/graphs/1Y` | the graphs (also `/3M` and `/1D`) and the econometric measures |
+| `#<TICKER>/ratios` | the fundamental ratios |
+| `#<TICKER>/news`, `/info`, `/analyst` | empty for now |
 
 ## Steps
 
@@ -32,6 +39,8 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
    - `ok` is false: Yahoo doesn't know the symbol. Suggest the likely one.
    - `type` isn't EQUITY or ETF: ask before going on, because the page will have no company ratios.
    - `page_exists` is true but the user didn't ask to rebuild: ask whether to rebuild.
+
+   If `archived` is true, the asset was deleted before. Run `.\.venv\Scripts\python.exe UI\pipeline\new_page.py restore <TICKER>` instead of creating it: that brings back its earlier settings and `customize()` code. Then go to step 5. Only build a fresh page if the user asked for one.
 3. **Choose the comparison series.** Read `${CLAUDE_SKILL_DIR}/references/compare-series.md`. Beta and correlation are measured against these series, so pick what actually moves the stock:
    - the market (SPY for US listings)
    - the asset's domain ETF
@@ -48,8 +57,9 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 
    The command registers the asset at the end of Your assets, runs the first update and prints the result. If the update fails, report the error instead of retrying in a loop.
 5. **Check.** Run `.\.venv\Scripts\python.exe UI\pipeline\new_page.py check <TICKER>`, then Read the screenshots it lists and confirm:
-   - the chart is drawn
-   - the ratios are filled in
+   - the first page shows the five boxes
+   - the graphs are drawn (1 year and 1 day)
+   - the ratios page is filled in
    - no labels collide
 
    `empty_values` lists the ratios Yahoo didn't provide. Gaps are normal for ETFs and young companies; tell the user which missing ones matter.
@@ -65,4 +75,4 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 - Only add tickers the user asked for.
 - Don't edit `UI/pipeline/asset_page.py` to suit one asset; that changes every page. One-asset changes go in that asset's `customize()` (see `${CLAUDE_SKILL_DIR}/references/customizing.md`).
 - If you change what the pipeline writes, follow `${CLAUDE_SKILL_DIR}/references/page-contract.md`, and update `UI/static/app.js` in the same change.
-- To take an asset off the list, run `new_page.py remove <TICKER>`. It keeps the folder; delete the folder only if the user asks.
+- To delete an asset, which is what the UI's ✕ button does, run `new_page.py delete <TICKER>`. It moves the asset's folder to `UI/asset/_deleted/` and removes its data files. `new_page.py restore <TICKER>` brings it back. `new_page.py remove <TICKER>` only takes it off the list and leaves the files in place. Empty `_deleted/` only if the user asks.

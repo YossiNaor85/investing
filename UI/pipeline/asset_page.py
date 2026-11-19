@@ -128,7 +128,7 @@ def load_registry(ui_dir: Path) -> list:
     path = ui_dir / "assets.json"
     if not path.exists():
         return []
-    return json.loads(path.read_text(encoding="utf-8")).get("assets", [])
+    return json.loads(path.read_text(encoding="utf-8-sig")).get("assets", [])
 
 
 def save_registry(ui_dir: Path, assets: list) -> None:
@@ -145,7 +145,7 @@ def write_assets(ui_dir: Path) -> None:
         entry = {"ticker": ticker, "name": a.get("name") or ticker, "has_data": False}
         path = data_dir / f"{ticker}.json"
         if path.exists():
-            d = json.loads(path.read_text(encoding="utf-8"))
+            d = json.loads(path.read_text(encoding="utf-8-sig"))
             q = d.get("quote") or {}
             entry.update(name=d.get("name") or entry["name"], has_data=True, price=q.get("price"),
                          change_pct=q.get("change_pct"), currency=d.get("currency"), updated_at=d.get("updated_at"))
@@ -663,7 +663,7 @@ def write_outputs(data: dict, ui_dir: Path) -> Path:
 
 
 def load_config(path: Path) -> dict:
-    cfg = json.loads(path.read_text(encoding="utf-8"))
+    cfg = json.loads(path.read_text(encoding="utf-8-sig"))
     if not cfg.get("ticker"):
         raise ValueError(f"{path}: no ticker")
     return cfg

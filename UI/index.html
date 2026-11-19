@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Investing</title>
-  <link rel="stylesheet" href="static/styles.css">
+  <link rel="stylesheet" href="static/styles.css?v=5">
   <script>
     // Apply a saved theme before the first paint (Auto follows the system setting).
     try {
@@ -45,7 +45,7 @@
 
     <section id="empty-state" class="empty">
       <h1>Choose an asset</h1>
-      <p>Open <strong>Your assets</strong> and pick one to see its trading points, financial ratios and econometric measures.</p>
+      <p>Open <strong>Your assets</strong> and pick one to see its graphs, fundamental ratios and more.</p>
     </section>
 
     <section id="missing-state" class="empty" hidden>
@@ -55,11 +55,20 @@
     </section>
 
     <section id="asset-view" hidden>
+      <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden>
+        <a id="crumb-asset" href="#"></a>
+        <span class="crumb-sep" aria-hidden="true">›</span>
+        <span id="crumb-current" aria-current="page"></span>
+      </nav>
+
       <div class="asset-head">
         <div class="asset-id">
           <h1 id="asset-title"></h1>
           <p id="asset-sub" class="muted"></p>
           <p id="asset-note" class="muted small asset-note" hidden></p>
+          <div class="asset-actions">
+            <button id="delete-asset" class="btn btn-ghost btn-small btn-danger" type="button">Delete</button>
+          </div>
         </div>
         <div class="quote">
           <div id="quote-price" class="hero"></div>
@@ -68,47 +77,62 @@
         </div>
       </div>
 
-      <div id="kpis" class="kpis"></div>
-
-      <div class="filter-row">
-        <span class="filter-label" id="window-label">Window</span>
-        <div class="segmented" role="group" aria-labelledby="window-label">
-          <button type="button" data-window="1Y" aria-pressed="true">1 year</button>
-          <button type="button" data-window="3M" aria-pressed="false">3 months</button>
-          <button type="button" data-window="1D" aria-pressed="false">1 day</button>
-        </div>
-      </div>
-
-      <section class="card chart-card">
-        <h2 id="chart-title">Trading points</h2>
-        <p id="chart-sub" class="muted small"></p>
-        <div id="chart-legend" class="legend"></div>
-        <div id="chart" class="chart" tabindex="0"
-             aria-describedby="chart-help"></div>
-        <p id="chart-help" class="muted small chart-help">Hover, or focus the chart and use the arrow keys, to read each point.</p>
-        <div class="card-foot">
-          <button id="table-toggle" class="btn btn-ghost btn-small" type="button"
-                  aria-expanded="false" aria-controls="chart-table">Show table</button>
-        </div>
-        <div id="chart-table" class="table-wrap" hidden></div>
+      <!-- The asset's first page: headline tiles, and a box for each section -->
+      <section id="view-overview" class="view">
+        <div id="kpis" class="kpis"></div>
+        <h2 class="sr-only">Sections</h2>
+        <div id="boxes" class="boxes"></div>
       </section>
 
-      <div class="panels">
-        <section class="card">
-          <h2>Financial ratios</h2>
-          <div id="ratios"></div>
+      <section id="view-graphs" class="view" hidden>
+        <div class="filter-row">
+          <span class="filter-label" id="window-label">Window</span>
+          <div class="segmented" role="group" aria-labelledby="window-label">
+            <button type="button" data-window="1Y" aria-pressed="true">1 year</button>
+            <button type="button" data-window="3M" aria-pressed="false">3 months</button>
+            <button type="button" data-window="1D" aria-pressed="false">1 day</button>
+          </div>
+        </div>
+
+        <section class="card chart-card">
+          <h2 id="chart-title">Trading points</h2>
+          <p id="chart-sub" class="muted small"></p>
+          <div id="chart-legend" class="legend"></div>
+          <div id="chart" class="chart" tabindex="0" aria-describedby="chart-help"></div>
+          <p id="chart-help" class="muted small chart-help">Hover, or focus the chart and use the arrow keys, to read each point.</p>
+          <div class="card-foot">
+            <button id="table-toggle" class="btn btn-ghost btn-small" type="button"
+                    aria-expanded="false" aria-controls="chart-table">Show table</button>
+          </div>
+          <div id="chart-table" class="table-wrap" hidden></div>
         </section>
-        <section class="card">
+
+        <section class="card wide-card">
           <h2>Econometric measures</h2>
-          <div id="econ"></div>
+          <div id="econ" class="groups-grid"></div>
         </section>
-      </div>
+      </section>
+
+      <section id="view-ratios" class="view" hidden>
+        <section class="card wide-card">
+          <h2>Fundamental ratios</h2>
+          <div id="ratios" class="groups-grid"></div>
+        </section>
+      </section>
+
+      <!-- News, Info and Connect the dots: empty for now -->
+      <section id="view-empty" class="view" hidden>
+        <section class="card placeholder">
+          <h2 id="placeholder-title"></h2>
+          <p class="muted">Nothing here yet.</p>
+        </section>
+      </section>
 
       <div id="warnings" class="warnings" hidden></div>
       <p id="source" class="muted small source"></p>
     </section>
   </main>
 
-  <script src="static/app.js"></script>
+  <script src="static/app.js?v=5"></script>
 </body>
 </html>

@@ -1,7 +1,11 @@
-/* Investing UI: the "Your assets" picker, three price windows, and the
-   ratio panels.
+/* Investing UI: the "Your assets" picker, and for each asset a first page of
+   boxes that open its sections. Addresses:
+     #IREN            first page (overview)
+     #IREN/graphs/1Y  graphs, with the 1Y / 3M / 1D window
+     #IREN/ratios     fundamental ratios
+     #IREN/news, #IREN/info, #IREN/analyst   empty for now
    Data comes from data/<TICKER>.js, written by each asset's pipeline in UI/asset/<ticker>_page/.
-   When the page is served by UI/server.py, the Refresh button runs that updater. */
+   When the page is served by UI/server.py, the Refresh button runs that pipeline. */
 (() => {
   "use strict";
 
@@ -9,6 +13,22 @@
   const REREAD_MS = 5 * 60 * 1000;  // re-read the data files this often
   const POLL_MS = 1000;             // status polling while a refresh runs
   const WINDOWS = { "1Y": "1 year", "3M": "3 months", "1D": "1 day" };
+  const VIEWS = {
+    overview: "Overview",
+    graphs: "Graphs",
+    ratios: "Fundamental ratios",
+    news: "News",
+    info: "Info",
+    analyst: "Connect the dots",
+  };
+  const EMPTY_VIEWS = ["news", "info", "analyst"];
+  const BOXES = [
+    { view: "graphs", title: "Graphs", text: "Trading points over 1 year, 3 months and 1 day, with volume and the econometric measures." },
+    { view: "ratios", title: "Fundamental ratios", text: "Valuation, profitability, growth, balance sheet, ownership and analysts." },
+    { view: "news", title: "News", text: "Company, domain and macro news.", soon: true },
+    { view: "info", title: "Info", text: "The business, its domain, peers and plans.", soon: true },
+    { view: "analyst", title: "Connect the dots", text: "The analyst's story: why it moves and what to watch.", soon: true },
+  ];
   const HIGH_VOLUME = 1.5;          // same threshold as the updater
   const TICKER_RE = /^[A-Z0-9.\-]{1,12}$/;
   const THEME_KEY = "investing-theme";
@@ -18,6 +38,8 @@
 
   const state = {
     ticker: null,
+    view: "overview",
+    shownView: null,  // the view on screen, to scroll to the top only when it changes
     window: "1Y",
     data: null,
     currency: "USD",
@@ -27,6 +49,7 @@
     refreshing: false,
     addOpen: false,   // the Add asset form is showing in the menu
     adding: null,     // ticker being added, while the skill runs
+    deleting: null,   // ticker being deleted
   };
 
   const $ = (id) => document.getElementById(id);
@@ -160,8 +183,15 @@
         h("span", { class: "menu-name", text: a.name && a.name !== a.ticker ? a.name : "" }),
         h("span", { class: "menu-price", text: isNum(a.price) ? money(a.price, a.currency || "USD") : "" }),
         isNum(a.change_pct) ? deltaNode(a.change_pct) : h("span", { class: "muted small", text: a.has_data ? "" : "no data yet" }));
-      item.addEventListener("click", () => { closeMenu(); selectAsset(a.ticker); });
-      menu.append(item);
+      item.addEventListener("click", () => { closeMenu(); go(a.ticker, "overview"); });
+      const followed = (window.INVESTING_ASSETS || []).some((x) => x.ticker === a.ticker);
+      const del = h("button", { class: "menu-delete", type: "button", role: "menuitem", "data-delete": a.ticker,
+        "aria-label": "Delete " + a.ticker,
+        title: state.server ? "Delete " + a.ticker + " from Your assets" : "Deleting needs the UI server",
+        disabled: !state.server || !followed || state.deleting ? true : null,
+        text: state.deleting === a.ticker ? "…" : "✕" });
+      del.addEventListener("click", (e) => { e.stopPropagation(); deleteAsset(a.ticker); });
+      menu.append(h("div", { class: "menu-row", role: "none" }, item, del));
     }
     const add = h("button", { class: "menu-item menu-add", type: "button", role: "menuitem",
       "aria-expanded": String(state.addOpen), disabled: state.adding ? true : null },
@@ -190,7 +220,9 @@
     return form;
   }
 
-  function menuItems() { return Array.from($("assets-menu").querySelectorAll(".menu-item")); }
+  function menuItems() {
+    return Array.from($("assets-menu").querySelectorAll(".menu-item, .menu-delete")).filter((el) => !el.disabled);
+  }
 
   function openMenu() {
     $("assets-menu").hidden = false;
@@ -225,23 +257,45 @@
   // ---------------------------------------------------------------- routing
 
   function parseHash() {
-    const [t, w] = decodeURIComponent(location.hash.replace(/^#/, "")).split("/");
-    const ticker = (t || "").toUpperCase();
-    return { ticker: TICKER_RE.test(ticker) ? ticker : null, window: WINDOWS[w] ? w : null };
+    const parts = decodeURIComponent(location.hash.replace(/^#/, "")).split("/").filter(Boolean);
+    const ticker = (parts[0] || "").toUpperCase();
+    let view = "overview", win = null;
+    if (WINDOWS[parts[1]]) {  // older links, like #IREN/1Y, open the graphs
+      view = "graphs";
+      win = parts[1];
+    } else if (VIEWS[parts[1]]) {
+      view = parts[1];
+      if (view === "graphs" && WINDOWS[parts[2]]) win = parts[2];
+    }
+    return { ticker: TICKER_RE.test(ticker) ? ticker : null, view, window: win };
   }
 
-  function writeHash() {
-    const next = "#" + state.ticker + "/" + state.window;
-    if (location.hash !== next) history.replaceState(null, "", next);
+  function hashFor(ticker, view, win) {
+    if (!view || view === "overview") return "#" + ticker;
+    return "#" + ticker + "/" + view + (view === "graphs" ? "/" + (win || state.window) : "");
   }
 
-  async function selectAsset(ticker, win) {
-    state.ticker = ticker;
-    if (win) state.window = win;
-    const data = await loadAsset(ticker);
-    if (!data) { showMissing(ticker); return; }
-    render(data);
-    writeHash();
+  /** Go to an asset's view. Changing the hash adds a history entry, so Back works. */
+  function go(ticker, view, win) {
+    const next = hashFor(ticker, view || "overview", win);
+    if (location.hash === next) route();
+    else location.hash = next;
+  }
+
+  /** Show what the address names: load the asset's data when needed, then its view. */
+  async function route() {
+    const r = parseHash();
+    if (!r.ticker) return;
+    if (r.window) state.window = r.window;
+    state.view = r.view;
+    if (r.ticker !== state.ticker || !state.data) {
+      state.ticker = r.ticker;
+      const data = await loadAsset(r.ticker);
+      if (!data) { showMissing(r.ticker); return; }
+      render(data);
+    } else {
+      showView();
+    }
   }
 
   function showMissing(ticker) {
@@ -260,13 +314,82 @@
     $("empty-state").hidden = true;
     $("missing-state").hidden = true;
     $("asset-view").hidden = false;
-    document.title = data.ticker + " · Investing";
     renderHead(data);
     renderKpis(data.kpis);
-    renderWindow();
+    renderBoxes(data);
     renderGroups($("ratios"), data.ratios);
     renderGroups($("econ"), data.econometrics);
     renderFooter(data);
+    showView();
+  }
+
+  /** Show the current view's section; the chart is drawn only once its section is visible. */
+  function showView() {
+    const v = state.view;
+    for (const name of ["overview", "graphs", "ratios"]) $("view-" + name).hidden = v !== name;
+    $("view-empty").hidden = !EMPTY_VIEWS.includes(v);
+    $("placeholder-title").textContent = VIEWS[v];
+    $("crumbs").hidden = v === "overview";
+    $("crumb-asset").textContent = state.ticker;
+    $("crumb-asset").setAttribute("href", hashFor(state.ticker, "overview"));
+    $("crumb-current").textContent = VIEWS[v];
+    $("delete-asset").hidden = v !== "overview";
+    document.title = state.ticker + (v === "overview" ? "" : " · " + VIEWS[v]) + " · Investing";
+    if (v === "graphs") renderWindow();
+    const key = state.ticker + "/" + v;
+    if (state.shownView !== key) {
+      state.shownView = key;
+      window.scrollTo(0, 0);
+    }
+  }
+
+  function renderBoxes(d) {
+    const host = $("boxes");
+    host.textContent = "";
+    for (const b of BOXES) {
+      host.append(h("a", { class: "box" + (b.soon ? " box-soon" : ""), href: hashFor(d.ticker, b.view) },
+        h("div", { class: "box-head" },
+          h("h3", { class: "box-title", text: b.title }),
+          b.soon ? h("span", { class: "badge", text: "Coming soon" }) : null),
+        h("p", { class: "box-text", text: b.text }),
+        boxPreview(d, b.view)));
+    }
+  }
+
+  function findItem(groups, label) {
+    for (const g of groups || []) for (const it of g.items || []) if (it.label === label) return it;
+    return null;
+  }
+
+  function boxPreview(d, view) {
+    if (view === "graphs") {
+      const pts = ((d.series || {})["1Y"] || {}).points || [];
+      if (pts.length < 2) return null;
+      return h("div", { class: "box-preview" }, sparkline(pts.map((p) => p.c)),
+        h("span", { class: "box-stat", text: "1 year " + format(pts[pts.length - 1].c / pts[0].c - 1, "pct_signed") }));
+    }
+    if (view === "ratios") {
+      const picks = d.kind === "EQUITY" || !d.kind
+        ? ["Price / sales (TTM)", "Net margin", "Debt / equity"]
+        : ["Total assets", "Expense ratio", "Yield"];
+      const items = picks.map((label) => findItem(d.ratios, label)).filter(Boolean);
+      if (!items.length) return null;
+      return h("dl", { class: "box-facts" }, ...items.map((it) =>
+        h("div", {}, h("dt", { text: it.label }), h("dd", { text: format(it.value, it.fmt) }))));
+    }
+    return null;
+  }
+
+  function sparkline(values) {
+    const vals = values.filter(isNum);
+    const w = 240, ht = 44, pad = 4;
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const x = (i) => pad + (i / (vals.length - 1)) * (w - 2 * pad);
+    const y = (v) => ht - pad - ((v - lo) / (hi - lo || 1)) * (ht - 2 * pad);
+    const svg = svgEl("svg", { class: "spark", viewBox: "0 0 " + w + " " + ht, "aria-hidden": "true" });
+    svg.append(svgEl("path", { d: vals.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1)).join(""), class: "spark-line" }));
+    svg.append(svgEl("circle", { cx: x(vals.length - 1), cy: y(vals[vals.length - 1]), r: 3.5, class: "spark-dot" }));
+    return svg;
   }
 
   function renderHead(d) {
@@ -274,6 +397,7 @@
     $("asset-sub").textContent = [d.ticker, d.exchange, d.currency, d.classification].filter(Boolean).join(" · ");
     $("asset-note").textContent = d.note || "";
     $("asset-note").hidden = !d.note;
+    updateDeleteButton();
     const q = d.quote || {};
     $("quote-price").textContent = format(q.price, "money");
     const change = $("quote-change");
@@ -539,7 +663,14 @@
     if (intraday && isNum(sr.prev_close)) {
       const y = yAt(sr.prev_close);
       svg.append(svgEl("line", { x1: M.left, x2: M.left + plotW, y1: y, y2: y, class: "prev-line" }));
-      svg.append(svgEl("text", { x: M.left + plotW - 4, y: y - 6, class: "ref-label", "text-anchor": "end" },
+      // Label the line at the end where the price is farther from it (left unless the right is
+      // clearly clearer), on the side away from the price, so it doesn't sit on the price labels.
+      const closes = pts.map((p) => p.c).filter(isNum);
+      const left = { x: M.left + 6, anchor: "start", c: closes[0] };
+      const right = { x: M.left + plotW - 6, anchor: "end", c: closes[closes.length - 1] };
+      const side = Math.abs(yAt(right.c) - y) > Math.abs(yAt(left.c) - y) + 8 ? right : left;
+      const below = yAt(side.c) < y && y + 14 < priceBottom - 2;
+      svg.append(svgEl("text", { x: side.x, y: below ? y + 14 : y - 6, class: "ref-label", "text-anchor": side.anchor },
         "Previous close " + format(sr.prev_close, "money")));
     }
 
@@ -711,6 +842,7 @@
     }
     updateRefreshButton();
     renderMenu();
+    updateDeleteButton();
   }
 
   async function refresh() {
@@ -764,7 +896,7 @@
     if ((window.INVESTING_ASSETS || []).some((a) => a.ticker === ticker)) {
       closeMenu();
       setStatus(ticker + " is already in Your assets.");
-      selectAsset(ticker);
+      go(ticker, "overview");
       return;
     }
     if (!state.server) {
@@ -784,7 +916,7 @@
       if (res.status === 409 && body.registered) {
         await loadAssets();
         setStatus(ticker + " is already in Your assets.");
-        await selectAsset(ticker);
+        go(ticker, "overview");
         return;
       }
       if (!res.ok) throw new Error(body.error || "the server answered " + res.status);
@@ -796,7 +928,7 @@
       } while (status.state === "running");
       await loadAssets();
       if (status.added) {
-        await selectAsset(ticker);
+        go(ticker, "overview");
         setStatus(ticker + " added.", "ok");
         showNotice(ticker + " added", status.message, status.via);
       } else {
@@ -808,6 +940,57 @@
     } finally {
       state.adding = null;
       renderMenu();
+    }
+  }
+
+  function updateDeleteButton() {
+    const b = $("delete-asset");
+    if (!state.ticker) return;
+    b.textContent = state.deleting === state.ticker ? "Deleting…" : "Delete " + state.ticker;
+    b.disabled = !state.server || Boolean(state.deleting);
+    b.title = state.server
+      ? "Delete " + state.ticker + " from Your assets"
+      : "Deleting needs the UI server: start it with UI\\link\\start-investing-ui.cmd";
+  }
+
+  function showEmpty() {
+    state.ticker = null;
+    state.data = null;
+    state.view = "overview";
+    state.shownView = null;
+    $("asset-view").hidden = true;
+    $("missing-state").hidden = true;
+    $("empty-state").hidden = false;
+    document.title = "Investing";
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+
+  /** Delete an asset. The server archives its folder in UI/asset/_deleted/, so it can be restored. */
+  async function deleteAsset(ticker) {
+    if (!state.server) {
+      setStatus("Deleting needs the UI server: start it with UI\\link\\start-investing-ui.cmd.", "warn");
+      return;
+    }
+    const sure = window.confirm("Delete " + ticker + " from Your assets?");
+    if (!sure) return;
+    state.deleting = ticker;
+    renderMenu();
+    updateDeleteButton();
+    try {
+      const res = await fetch("api/assets?ticker=" + encodeURIComponent(ticker),
+        { method: "DELETE", headers: { "X-Requested-With": "investing-ui" } });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.ok) throw new Error(body.error || "the server answered " + res.status);
+      if (window.INVESTING_DATA) delete window.INVESTING_DATA[ticker];
+      await loadAssets();
+      if (state.ticker === ticker) showEmpty();
+      setStatus(ticker + " deleted.", "ok");
+    } catch (e) {
+      setStatus("Deleting " + ticker + " failed: " + e.message, "error");
+    } finally {
+      state.deleting = null;
+      renderMenu();
+      updateDeleteButton();
     }
   }
 
@@ -837,6 +1020,7 @@
     wireMenu();
     $("refresh-button").addEventListener("click", refresh);
     $("notice-close").addEventListener("click", () => { $("notice").hidden = true; });
+    $("delete-asset").addEventListener("click", () => { if (state.ticker) deleteAsset(state.ticker); });
     $("theme-button").addEventListener("click", () => {
       const order = ["auto", "light", "dark"];
       const now = document.documentElement.getAttribute("data-theme") || "auto";
@@ -847,7 +1031,10 @@
       b.addEventListener("click", () => {
         state.window = b.dataset.window;
         state.hoverIndex = null;
-        if (state.data) { renderWindow(); writeHash(); }
+        if (state.data) {
+          renderWindow();
+          history.replaceState(null, "", hashFor(state.ticker, "graphs"));  // no history entry per window
+        }
       });
     }
     $("table-toggle").addEventListener("click", () => {
@@ -858,23 +1045,17 @@
     let lastWidth = 0;
     new ResizeObserver(() => {
       const w = $("chart").clientWidth;
-      if (state.data && Math.abs(w - lastWidth) > 1) {
+      if (state.data && state.view === "graphs" && w > 0 && Math.abs(w - lastWidth) > 1) {
         lastWidth = w;
         drawChart(state.data.series[state.window]);
       }
     }).observe($("chart"));
 
-    window.addEventListener("hashchange", () => {
-      const r = parseHash();
-      if (r.ticker && (r.ticker !== state.ticker || (r.window && r.window !== state.window))) selectAsset(r.ticker, r.window);
-    });
+    window.addEventListener("hashchange", route);
     setInterval(reread, REREAD_MS);
 
     detectServer();
-    loadAssets().then(() => {
-      const r = parseHash();
-      if (r.ticker) selectAsset(r.ticker, r.window);
-    });
+    loadAssets().then(route);
   }
 
   init();

@@ -6,9 +6,11 @@ r"""Serve the investing UI on this computer, and run its pipelines on demand.
 The page calls three endpoints:
 
     POST /api/refresh?ticker=IREN   run the asset's pipeline (listed in UI/assets.json)
-    POST /api/assets?ticker=RIOT    add an asset: run the asset-page skill headless
-                                    (claude -p "/asset-page RIOT") from the repo root
-    GET  /api/status?ticker=RIOT[&job=add]   progress of either job
+    POST /api/assets?ticker=RIOT    add an asset: restore it if it was deleted before, otherwise
+                                    run the asset-page skill headless (claude -p "/asset-page RIOT")
+    DELETE /api/assets?ticker=RIOT  delete an asset (UI/pipeline/new_page.py delete): off the list,
+                                    folder archived to UI/asset/_deleted/, data files removed
+    GET  /api/status?ticker=RIOT[&job=add]   progress of a refresh or an add
 
 Without the claude command, adding falls back to UI/pipeline/new_page.py with
 its suggested comparison series. The server listens on 127.0.0.1 only, so no
@@ -47,7 +49,7 @@ def now() -> str:
 def pipeline_for(ticker: str) -> Optional[Path]:
     """The asset's update script from UI/assets.json, or None if it isn't followed."""
     try:
-        assets = json.loads((UI_DIR / "assets.json").read_text(encoding="utf-8")).get("assets", [])
+        assets = json.loads((UI_DIR / "assets.json").read_text(encoding="utf-8-sig")).get("assets", [])
     except (OSError, ValueError):
         return None
     for a in assets:
@@ -75,10 +77,27 @@ def refresh_job(script: Path) -> Callable[[], dict]:
     return work
 
 
+def archived(ticker: str) -> bool:
+    """True if a deleted copy of this asset's page is waiting in UI/asset/_deleted/."""
+    slug = re.sub(r"[^a-z0-9]+", "_", ticker.lower()).strip("_")
+    return any((UI_DIR / "asset" / "_deleted").glob(f"{slug}_page-*"))
+
+
 def add_job(ticker: str) -> Callable[[], dict]:
     def work() -> dict:
         claude = shutil.which("claude")
-        if claude:
+        if archived(ticker):  # it was deleted before: bring back its page and settings
+            via = "restoring its earlier page and settings"
+            code, out, err = run([sys.executable, str(NEW_PAGE), "restore", ticker], ADD_TIMEOUT_S)
+            try:
+                result = json.loads(out)
+                message = f"{ticker} is back, with the comparison series and settings it had before it was deleted."
+                failed = not result.get("ok")
+                if failed:
+                    message = result.get("error") or "\n".join(result.get("first_update") or [])
+            except ValueError:
+                message, failed = (out.strip() or err.strip())[-3000:], True
+        elif claude:
             via = "the asset-page skill (Claude Code, headless)"
             code, out, err = run([claude, "-p", f"/asset-page {ticker}", "--permission-mode", "dontAsk",
                                   "--output-format", "json", "--max-turns", "40"], ADD_TIMEOUT_S)
@@ -149,6 +168,10 @@ class Handler(SimpleHTTPRequestHandler):
     def end_headers(self):
         if self.path.startswith(("/data/", "/api/")):
             self.send_header("Cache-Control", "no-store")
+        else:
+            # Make the browser re-check the page and its files on every load,
+            # so a normal reload always picks up changes to the UI.
+            self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
     def _local(self) -> bool:
@@ -166,8 +189,11 @@ class Handler(SimpleHTTPRequestHandler):
     def _query(self) -> dict:
         return parse_qs(urlparse(self.path).query)
 
-    def _ticker(self) -> Optional[str]:
-        ticker = (self._query().get("ticker") or ["IREN"])[0].strip().upper()
+    def _ticker(self, required: bool = False) -> Optional[str]:
+        values = self._query().get("ticker")
+        if not values:
+            return None if required else "IREN"
+        ticker = values[0].strip().upper()
         return ticker if TICKER_RE.match(ticker) else None
 
     def do_GET(self):
@@ -208,6 +234,26 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(409, {"error": "another asset is being added; try again when it finishes", "ticker": ticker})
         self.jobs.start(f"add:{ticker}", add_job(ticker))
         return self._json(202, dict(self.jobs.get(f"add:{ticker}"), ticker=ticker))
+
+    def do_DELETE(self):
+        if not self._local() or self.headers.get("X-Requested-With") != "investing-ui":
+            return self._json(403, {"error": "only the investing UI on this computer can do that"})
+        if urlparse(self.path).path != "/api/assets":
+            return self._json(404, {"error": "not found"})
+        ticker = self._ticker(required=True)  # never fall back to a default here
+        if not ticker:
+            return self._json(400, {"error": "say which asset to delete: ?ticker=..."})
+        if not pipeline_for(ticker):
+            return self._json(404, {"error": f"{ticker} isn't in Your assets"})
+        if any(self.jobs.get(f"{job}:{ticker}").get("state") == "running" for job in ("refresh", "add")):
+            return self._json(409, {"error": f"{ticker} is updating right now; try again when it finishes"})
+        code, out, err = run([sys.executable, str(NEW_PAGE), "delete", ticker], 60)
+        try:
+            result = json.loads(out)
+        except ValueError:
+            result = {"ok": False, "error": (err or out).strip()[-500:] or f"exit code {code}"}
+        print(f"{datetime.now():%H:%M:%S} delete:{ticker}: {'done' if result.get('ok') else 'error'}")
+        return self._json(200 if code == 0 and result.get("ok") else 500, result)
 
 
 class Server(ThreadingHTTPServer):

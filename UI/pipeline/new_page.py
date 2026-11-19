@@ -4,7 +4,9 @@ r"""Create, check and manage the asset pages of the investing UI.
     .venv\Scripts\python.exe UI\pipeline\new_page.py create NVDA --compare "SMH=Semiconductors (SMH)" --why "SMH=AI chip demand"
     .venv\Scripts\python.exe UI\pipeline\new_page.py check NVDA
     .venv\Scripts\python.exe UI\pipeline\new_page.py list
-    .venv\Scripts\python.exe UI\pipeline\new_page.py remove NVDA
+    .venv\Scripts\python.exe UI\pipeline\new_page.py delete NVDA    # what the UI's delete button runs
+    .venv\Scripts\python.exe UI\pipeline\new_page.py restore NVDA   # brings a deleted asset back
+    .venv\Scripts\python.exe UI\pipeline\new_page.py remove NVDA    # off the list only; files stay
 
 The asset-page skill (.claude/skills/asset-page/) drives these commands.
 --ui-dir points at another copy of the UI folder, for testing.
@@ -15,10 +17,11 @@ import argparse
 import json
 import os
 import re
+import shutil
 import string
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 PIPELINE_DIR = Path(__file__).resolve().parent
@@ -155,6 +158,9 @@ def cmd_inspect(args) -> int:
         notes.append(f"Prices are in {info.get('currency')}; consider a local market index instead of SPY.")
     page_dir, _, cfg_path = page_paths(ui, ticker)
     registered = any(a["ticker"] == ticker for a in ap.load_registry(ui))
+    archives = sorted((ui / "asset" / "_deleted").glob(f"{ap.slug(ticker)}_page-*"))
+    if archives and not registered and not cfg_path.exists():
+        notes.append("This asset was deleted before; `restore` brings back its earlier page and settings.")
     print(json.dumps({
         "ok": bool(info) and days > 0,
         "ticker": ticker,
@@ -171,6 +177,8 @@ def cmd_inspect(args) -> int:
         "business": (info.get("longBusinessSummary") or "")[:700],
         "registered": registered,
         "page_exists": cfg_path.exists(),
+        "archived": bool(archives),
+        "archived_copy": str(archives[-1]) if archives else None,
         "page_dir": str(page_dir),
         "suggested_market": "SPY",
         "suggested_compare": suggest(info),
@@ -197,7 +205,7 @@ def cmd_create(args) -> int:
         if not args.rebuild:
             return fail(f"{cfg_path} already exists. Pass --rebuild to rewrite its config "
                         "(the update script, and any customize() code in it, are kept).")
-        old = json.loads(cfg_path.read_text(encoding="utf-8"))
+        old = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     if args.rebuild and not compare:  # keep the asset's current series
         compare, why = dict(old.get("compare") or {}), dict(old.get("why") or {})
     info = ap.fetch_info(ticker)
@@ -227,7 +235,7 @@ def cmd_create(args) -> int:
     ap.write_atomic(cfg_path, json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
     script_created = False
     if args.new_script or not script.exists():
-        text = string.Template(TEMPLATE.read_text(encoding="utf-8")).substitute(
+        text = string.Template(TEMPLATE.read_text(encoding="utf-8-sig")).substitute(
             TICKER=ticker, NAME=name, SLUG=ap.slug(ticker), CREATED=cfg["created"])
         script.write_text(text, encoding="utf-8")
         script_created = True
@@ -242,11 +250,9 @@ def cmd_create(args) -> int:
         entries.append(entry)
     ap.save_registry(ui, entries)
 
-    proc = subprocess.run([sys.executable, str(script)], cwd=str(ui.parent), capture_output=True,
-                          env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=300)
-    output = (proc.stdout + proc.stderr).decode("utf-8", "replace").strip().splitlines()
+    ok, output = run_update(ui, script)
     print(json.dumps({
-        "ok": proc.returncode == 0,
+        "ok": ok,
         "ticker": ticker,
         "name": name,
         "config": str(cfg_path),
@@ -254,10 +260,10 @@ def cmd_create(args) -> int:
         "script_created": script_created,
         "registered_position": [e["ticker"] for e in entries].index(ticker) + 1,
         "compare": compare,
-        "first_update": output[-6:],
+        "first_update": output,
         "link": f"http://127.0.0.1:8765/#{ticker}",
     }, indent=2, ensure_ascii=False))
-    return 0 if proc.returncode == 0 else 1
+    return 0 if ok else 1
 
 
 def find_edge():
@@ -270,7 +276,7 @@ def cmd_check(args) -> int:
     path = ui / "data" / f"{ticker}.json"
     if not path.exists():
         return fail(f"no data file for {ticker}: run its update script first")
-    d = json.loads(path.read_text(encoding="utf-8"))
+    d = json.loads(path.read_text(encoding="utf-8-sig"))
     problems = []
     windows = {w: len((d.get("series", {}).get(w) or {}).get("points", [])) for w in ("1Y", "3M", "1D")}
     if windows["1Y"] < 120:
@@ -291,11 +297,14 @@ def cmd_check(args) -> int:
     if edge and not args.no_screenshots:
         out_dir = ui / "data" / "_checks"
         out_dir.mkdir(parents=True, exist_ok=True)
-        for win in ("1Y", "1D"):
-            out = out_dir / f"{ticker}-{win}.png"
-            url = (ui / "index.html").as_uri() + f"#{ticker}/{win}"
+        # The first page, the graphs (1 year and 1 day) and the ratios page.
+        views = [("overview", "", "1280,900"), ("graphs-1Y", "/graphs/1Y", "1280,1500"),
+                 ("graphs-1D", "/graphs/1D", "1280,1500"), ("ratios", "/ratios", "1280,1300")]
+        for name, route, size in views:
+            out = out_dir / f"{ticker}-{name}.png"
+            url = (ui / "index.html").as_uri() + f"#{ticker}{route}"
             subprocess.run([edge, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                            f"--user-data-dir={out_dir / 'edge-profile'}", "--window-size=1280,1900",
+                            f"--user-data-dir={out_dir / 'edge-profile'}", f"--window-size={size}",
                             "--virtual-time-budget=8000", f"--screenshot={out}", url],
                            capture_output=True, timeout=90)
             if out.exists():
@@ -334,6 +343,65 @@ def cmd_remove(args) -> int:
     page_dir, _, _ = page_paths(ui, ticker)
     print(json.dumps({"ok": True, "removed": ticker, "folder_kept": str(page_dir)}, indent=2))
     return 0
+
+
+def run_update(ui: Path, script: Path) -> tuple:
+    """Run an asset's update script; (ok, last lines of its output)."""
+    proc = subprocess.run([sys.executable, str(script)], cwd=str(ui.parent), capture_output=True,
+                          env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=300)
+    output = (proc.stdout + proc.stderr).decode("utf-8", "replace").strip().splitlines()
+    return proc.returncode == 0, output[-6:]
+
+
+def cmd_delete(args) -> int:
+    """Take an asset off Your assets, archive its folder in UI/asset/_deleted/, drop its data files."""
+    ticker = args.ticker.upper()
+    ui = ui_dir_from(args)
+    entries = ap.load_registry(ui)
+    entry = next((e for e in entries if e["ticker"] == ticker), None)
+    if not entry:
+        return fail(f"{ticker} isn't in Your assets")
+    page_dir = (ui / entry["pipeline"]).parent if entry.get("pipeline") else page_paths(ui, ticker)[0]
+    archived = None
+    if page_dir.is_dir():
+        trash = ui / "asset" / "_deleted"
+        trash.mkdir(parents=True, exist_ok=True)
+        archived = trash / f"{page_dir.name}-{datetime.now():%Y%m%d-%H%M%S}"
+        shutil.move(str(page_dir), str(archived))
+    ap.save_registry(ui, [e for e in entries if e["ticker"] != ticker])
+    removed = []
+    data_dir = ui / "data"
+    for path in [data_dir / f"{ticker}.js", data_dir / f"{ticker}.json", *(data_dir / "_checks").glob(f"{ticker}-*.png")]:
+        if path.exists():
+            path.unlink()
+            removed.append(path.name)
+    ap.write_assets(ui)
+    print(json.dumps({"ok": True, "deleted": ticker, "archived_to": str(archived) if archived else None,
+                      "data_removed": removed, "restore_with": f"new_page.py restore {ticker}"}, indent=2))
+    return 0
+
+
+def cmd_restore(args) -> int:
+    """Bring back the most recently deleted page of an asset, and update it."""
+    ticker = args.ticker.upper()
+    ui = ui_dir_from(args)
+    entries = ap.load_registry(ui)
+    if any(e["ticker"] == ticker for e in entries):
+        return fail(f"{ticker} is already in Your assets")
+    archives = sorted((ui / "asset" / "_deleted").glob(f"{ap.slug(ticker)}_page-*"))
+    if not archives:
+        return fail(f"no deleted page for {ticker} in {ui / 'asset' / '_deleted'}")
+    page_dir, script, cfg_path = page_paths(ui, ticker)
+    if page_dir.exists():
+        return fail(f"{page_dir} already exists")
+    shutil.move(str(archives[-1]), str(page_dir))
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+    entries.append({"ticker": ticker, "name": cfg.get("name") or ticker,
+                    "pipeline": script.relative_to(ui).as_posix(), "added": cfg.get("created") or date.today().isoformat()})
+    ap.save_registry(ui, entries)
+    ok, output = run_update(ui, script)
+    print(json.dumps({"ok": ok, "restored": ticker, "from": str(archives[-1]), "first_update": output}, indent=2))
+    return 0 if ok else 1
 
 
 def main() -> int:
@@ -375,6 +443,14 @@ def main() -> int:
     p = sub.add_parser("remove", help="take an asset out of Your assets (its folder is kept)")
     p.add_argument("ticker")
     p.set_defaults(func=cmd_remove)
+
+    p = sub.add_parser("delete", help="delete an asset: off the list, folder archived to asset/_deleted/, data removed")
+    p.add_argument("ticker")
+    p.set_defaults(func=cmd_delete)
+
+    p = sub.add_parser("restore", help="bring back an asset's most recently deleted page")
+    p.add_argument("ticker")
+    p.set_defaults(func=cmd_restore)
 
     args = parser.parse_args()
     return args.func(args)
