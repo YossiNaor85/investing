@@ -1,6 +1,6 @@
 r"""Shared engine for the asset pages of the investing UI.
 
-Every followed asset has a folder UI/<slug>_page/ containing:
+Every followed asset has a folder UI/asset/<slug>_page/ containing:
 
     config.json              the asset's settings: comparison series and why
     update_<slug>_page.py    its pipeline entry point, which calls main() below
@@ -699,7 +699,7 @@ def main(config_path, customize: Optional[Customize] = None) -> int:
             pass
     config_path = Path(config_path).resolve()
     cfg = load_config(config_path)
-    ui_dir = config_path.parent.parent
+    ui_dir = Path(__file__).resolve().parents[1]  # this engine lives in UI/pipeline/
     parser = argparse.ArgumentParser(description=f"Refresh the {cfg['ticker']} page of the investing UI.")
     parser.add_argument("--every", type=float, metavar="MINUTES",
                         help="keep running and update every MINUTES minutes")

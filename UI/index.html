@@ -34,6 +34,15 @@
   </header>
 
   <main id="main">
+    <section id="notice" class="notice" role="region" aria-label="Asset-page skill report" hidden>
+      <div class="notice-head">
+        <strong id="notice-title"></strong>
+        <button id="notice-close" class="btn btn-ghost btn-small" type="button">Dismiss</button>
+      </div>
+      <p id="notice-via" class="muted small"></p>
+      <div id="notice-text" class="notice-text"></div>
+    </section>
+
     <section id="empty-state" class="empty">
       <h1>Choose an asset</h1>
       <p>Open <strong>Your assets</strong> and pick one to see its trading points, financial ratios and econometric measures.</p>
@@ -42,7 +51,7 @@
     <section id="missing-state" class="empty" hidden>
       <h1 id="missing-title">No data yet</h1>
       <p>Press <strong>Refresh</strong> (with the UI server running), or run:</p>
-      <pre><code>.venv\Scripts\python.exe UI\iren_page\update_iren_page.py</code></pre>
+      <pre><code>.venv\Scripts\python.exe UI\asset\&lt;ticker&gt;_page\update_&lt;ticker&gt;_page.py</code></pre>
     </section>
 
     <section id="asset-view" hidden>

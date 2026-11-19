@@ -90,7 +90,7 @@ def ui_dir_from(args) -> Path:
 
 def page_paths(ui: Path, ticker: str) -> tuple:
     s = ap.slug(ticker)
-    page_dir = ui / f"{s}_page"
+    page_dir = ui / "asset" / f"{s}_page"
     return page_dir, page_dir / f"update_{s}_page.py", page_dir / "config.json"
 
 
@@ -191,10 +191,6 @@ def cmd_create(args) -> int:
         why = parse_pairs(args.why)
     except ValueError as exc:
         return fail(str(exc))
-    market = args.market.upper()
-    if market not in compare:
-        compare = {market: ap.MARKET_LABELS.get(market, market), **compare}
-
     page_dir, script, cfg_path = page_paths(ui, ticker)
     old = {}
     if cfg_path.exists():
@@ -202,10 +198,19 @@ def cmd_create(args) -> int:
             return fail(f"{cfg_path} already exists. Pass --rebuild to rewrite its config "
                         "(the update script, and any customize() code in it, are kept).")
         old = json.loads(cfg_path.read_text(encoding="utf-8"))
-
+    if args.rebuild and not compare:  # keep the asset's current series
+        compare, why = dict(old.get("compare") or {}), dict(old.get("why") or {})
     info = ap.fetch_info(ticker)
     if not info:
         return fail(f"Yahoo has no data for {ticker}")
+    if args.auto and not compare:  # no judgment available: take the suggestions as they are
+        for s in suggest(info):
+            compare[s["symbol"]] = s["label"]
+            why[s["symbol"]] = s["why"] + " (suggested automatically; not reviewed)"
+    market = (args.market or old.get("market") or "SPY").upper()
+    if market not in compare:
+        compare = {market: ap.MARKET_LABELS.get(market, market), **compare}
+
     name = info.get("longName") or info.get("shortName") or ticker
     today = date.today().isoformat()
     cfg = {
@@ -221,9 +226,9 @@ def cmd_create(args) -> int:
     page_dir.mkdir(parents=True, exist_ok=True)
     ap.write_atomic(cfg_path, json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
     script_created = False
-    if not script.exists():
+    if args.new_script or not script.exists():
         text = string.Template(TEMPLATE.read_text(encoding="utf-8")).substitute(
-            TICKER=ticker, NAME=name, SLUG=ap.slug(ticker), CREATED=today)
+            TICKER=ticker, NAME=name, SLUG=ap.slug(ticker), CREATED=cfg["created"])
         script.write_text(text, encoding="utf-8")
         script_created = True
 
@@ -347,11 +352,16 @@ def main() -> int:
 
     p = sub.add_parser("create", help="create (or with --rebuild, rewrite) an asset's page and pipeline")
     p.add_argument("ticker")
-    p.add_argument("--market", default="SPY", help="the series beta is measured against (default SPY)")
+    p.add_argument("--market", help="the series beta is measured against (default SPY, or the current one on --rebuild)")
     p.add_argument("--compare", action="append", metavar="SYMBOL=LABEL", help="a comparison series; repeat")
     p.add_argument("--why", action="append", metavar="SYMBOL=REASON", help="why a series matters; repeat")
     p.add_argument("--note", help="a line shown under the asset's name, e.g. why it's followed")
-    p.add_argument("--rebuild", action="store_true", help="rewrite an existing config")
+    p.add_argument("--rebuild", action="store_true",
+                   help="rewrite an existing config; without --compare it keeps the current series")
+    p.add_argument("--new-script", action="store_true",
+                   help="also rewrite the update script from the template (replaces any customize() code)")
+    p.add_argument("--auto", action="store_true",
+                   help="with no --compare: use the suggested series as they are (the UI's fallback without Claude)")
     p.set_defaults(func=cmd_create)
 
     p = sub.add_parser("check", help="validate an asset's data and screenshot its page")

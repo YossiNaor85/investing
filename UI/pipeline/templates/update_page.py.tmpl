@@ -6,8 +6,8 @@ does the work; this asset's settings are in config.json next to this file.
 
 Run from the repo root:
 
-    .venv\Scripts\python.exe UI\${SLUG}_page\update_${SLUG}_page.py             # one update
-    .venv\Scripts\python.exe UI\${SLUG}_page\update_${SLUG}_page.py --every 15  # every 15 minutes until stopped
+    .venv\Scripts\python.exe UI\asset\${SLUG}_page\update_${SLUG}_page.py             # one update
+    .venv\Scripts\python.exe UI\asset\${SLUG}_page\update_${SLUG}_page.py --every 15  # every 15 minutes until stopped
 
 The page's Refresh button runs this script through UI/server.py.
 Created by the asset-page skill on $CREATED.
@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))  # the UI folder, home of the shared engine
+# The UI folder is the nearest parent holding the shared engine, wherever this folder sits.
+UI_DIR = next(p for p in HERE.parents if (p / "pipeline" / "asset_page.py").is_file())
+sys.path.insert(0, str(UI_DIR))
 
 from pipeline import asset_page  # noqa: E402
 

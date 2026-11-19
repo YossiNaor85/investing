@@ -142,7 +142,21 @@ p { margin: 0; }
 .menu-ticker { font-weight: 700; }
 .menu-name { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-price { font-variant-numeric: tabular-nums; font-weight: 600; }
-.menu-foot { padding: 8px 10px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--grid); margin-top: 4px; }
+.menu-add { border-top: 1px solid var(--grid); border-radius: 0 0 8px 8px; margin-top: 4px; }
+.menu-add:disabled { cursor: progress; opacity: 0.7; }
+.add-form { padding: 4px 10px 10px; }
+.add-row { display: flex; gap: 8px; }
+.add-input {
+  flex: 1; min-width: 0; font: inherit; text-transform: uppercase;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--page); color: var(--text-primary);
+}
+.add-input::placeholder { text-transform: none; color: var(--text-muted); }
+.add-help { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+
+.notice { margin-bottom: 20px; padding: 14px 16px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; }
+.notice-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.notice-text { margin-top: 8px; white-space: pre-wrap; max-height: 320px; overflow: auto; font-size: 13px; color: var(--text-secondary); }
 
 /* ---------- layout */
 main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; transition: opacity 0.2s; }

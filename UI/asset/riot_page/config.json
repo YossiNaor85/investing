@@ -1,0 +1,18 @@
+{
+  "ticker": "RIOT",
+  "name": "Riot Platforms, Inc.",
+  "market": "SPY",
+  "compare": {
+    "SPY": "S&P 500 (SPY)",
+    "WGMI": "Bitcoin miners (WGMI)",
+    "BTC-USD": "Bitcoin (BTC-USD)"
+  },
+  "why": {
+    "SPY": "the market",
+    "WGMI": "RIOT's domain: listed bitcoin miners (Yahoo's Capital Markets label doesn't fit)",
+    "BTC-USD": "bitcoin mining revenue"
+  },
+  "note": null,
+  "created": "2026-11-19",
+  "updated": "2026-11-19"
+}

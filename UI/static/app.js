@@ -1,6 +1,6 @@
 /* Investing UI: the "Your assets" picker, three price windows, and the
    ratio panels.
-   Data comes from data/<TICKER>.js, written by UI/iren_page/update_iren_page.py.
+   Data comes from data/<TICKER>.js, written by each asset's pipeline in UI/asset/<ticker>_page/.
    When the page is served by UI/server.py, the Refresh button runs that updater. */
 (() => {
   "use strict";
@@ -25,6 +25,8 @@
     hoverIndex: null,
     server: false,
     refreshing: false,
+    addOpen: false,   // the Add asset form is showing in the menu
+    adding: null,     // ticker being added, while the skill runs
   };
 
   const $ = (id) => document.getElementById(id);
@@ -161,7 +163,31 @@
       item.addEventListener("click", () => { closeMenu(); selectAsset(a.ticker); });
       menu.append(item);
     }
-    menu.append(h("div", { class: "menu-foot", text: "Add an asset with the asset-page skill: /asset-page TICKER" }));
+    const add = h("button", { class: "menu-item menu-add", type: "button", role: "menuitem",
+      "aria-expanded": String(state.addOpen), disabled: state.adding ? true : null },
+      h("span", { class: "menu-ticker", "aria-hidden": "true", text: "+" }),
+      h("span", { class: "menu-name", text: state.adding ? "Adding " + state.adding + "…" : "Add asset" }));
+    add.addEventListener("click", () => {
+      state.addOpen = !state.addOpen;
+      renderMenu();
+      if (state.addOpen) $("add-ticker").focus();
+    });
+    menu.append(add);
+    if (state.addOpen) menu.append(addForm());
+  }
+
+  function addForm() {
+    const input = h("input", { id: "add-ticker", class: "add-input", type: "text", autocomplete: "off",
+      spellcheck: "false", maxlength: "12", placeholder: "Ticker, e.g. NVDA", "aria-label": "Ticker to add" });
+    const submit = h("button", { class: "btn btn-primary btn-small", type: "submit", text: "Add" });
+    if (!state.server) { input.disabled = true; submit.disabled = true; }
+    const form = h("form", { class: "add-form" },
+      h("div", { class: "add-row" }, input, submit),
+      h("p", { class: "add-help", text: state.server
+        ? "Runs the asset-page skill (Claude Code) on this computer. It builds the page and its pipeline, then opens it. Takes a minute or two."
+        : "Adding needs the UI server: start it with UI\\link\\start-investing-ui.cmd." }));
+    form.addEventListener("submit", (e) => { e.preventDefault(); addAsset(input.value); });
+    return form;
   }
 
   function menuItems() { return Array.from($("assets-menu").querySelectorAll(".menu-item")); }
@@ -184,6 +210,7 @@
   function wireMenu() {
     $("assets-button").addEventListener("click", () => ($("assets-menu").hidden ? openMenu() : closeMenu()));
     $("assets-menu").addEventListener("keydown", (e) => {
+      if (e.target.tagName === "INPUT" && e.key !== "Escape") return;  // typing a ticker
       const items = menuItems();
       const i = items.indexOf(document.activeElement);
       if (e.key === "ArrowDown") { items[(i + 1) % items.length].focus(); e.preventDefault(); }
@@ -673,7 +700,7 @@
     b.disabled = state.refreshing;
     b.textContent = state.refreshing ? "Refreshing…" : "Refresh";
     b.title = state.server
-      ? "Fetch the latest data now (runs UI\\iren_page\\update_iren_page.py)"
+      ? "Fetch the latest data now (runs this asset's pipeline in UI\\asset\\)"
       : "Refresh needs the UI server: start it with UI\\link\\start-investing-ui.cmd";
   }
 
@@ -683,6 +710,7 @@
       try { state.server = (await fetch("api/status", { cache: "no-store" })).ok; } catch (e) { /* page served elsewhere */ }
     }
     updateRefreshButton();
+    renderMenu();
   }
 
   async function refresh() {
@@ -719,6 +747,70 @@
     }
   }
 
+  function showNotice(title, text, via) {
+    $("notice-title").textContent = title;
+    $("notice-via").textContent = via ? "Done by " + via + "." : "";
+    $("notice-text").textContent = text || "";
+    $("notice").hidden = false;
+  }
+
+  /** Add an asset: the server runs the asset-page skill, and we wait for its report. */
+  async function addAsset(raw) {
+    const ticker = String(raw || "").trim().toUpperCase();
+    if (!TICKER_RE.test(ticker)) {
+      setStatus("Enter a ticker like NVDA, BRK-B or TEVA.TA.", "warn");
+      return;
+    }
+    if ((window.INVESTING_ASSETS || []).some((a) => a.ticker === ticker)) {
+      closeMenu();
+      setStatus(ticker + " is already in Your assets.");
+      selectAsset(ticker);
+      return;
+    }
+    if (!state.server) {
+      setStatus("Adding needs the UI server: start it with UI\\link\\start-investing-ui.cmd.", "warn");
+      return;
+    }
+    state.adding = ticker;
+    state.addOpen = false;
+    renderMenu();
+    closeMenu();
+    const started = Date.now();
+    setStatus("Adding " + ticker + ": the asset-page skill is running…");
+    try {
+      const q = "?ticker=" + encodeURIComponent(ticker);
+      const res = await fetch("api/assets" + q, { method: "POST", headers: { "X-Requested-With": "investing-ui" } });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 409 && body.registered) {
+        await loadAssets();
+        setStatus(ticker + " is already in Your assets.");
+        await selectAsset(ticker);
+        return;
+      }
+      if (!res.ok) throw new Error(body.error || "the server answered " + res.status);
+      let status;
+      do {
+        await sleep(2000);
+        status = await (await fetch("api/status" + q + "&job=add", { cache: "no-store" })).json();
+        setStatus("Adding " + ticker + ": the asset-page skill is running (" + Math.round((Date.now() - started) / 1000) + " s)…");
+      } while (status.state === "running");
+      await loadAssets();
+      if (status.added) {
+        await selectAsset(ticker);
+        setStatus(ticker + " added.", "ok");
+        showNotice(ticker + " added", status.message, status.via);
+      } else {
+        setStatus("Couldn't add " + ticker + "; see the note below.", "error");
+        showNotice("The asset-page skill stopped before adding " + ticker, status.message, status.via);
+      }
+    } catch (e) {
+      setStatus("Adding " + ticker + " failed: " + e.message, "error");
+    } finally {
+      state.adding = null;
+      renderMenu();
+    }
+  }
+
   /** Pick up files the updater wrote on its own (e.g. a scheduled run). */
   async function reread() {
     if (state.refreshing || !state.ticker) return;
@@ -744,6 +836,7 @@
   function init() {
     wireMenu();
     $("refresh-button").addEventListener("click", refresh);
+    $("notice-close").addEventListener("click", () => { $("notice").hidden = true; });
     $("theme-button").addEventListener("click", () => {
       const order = ["auto", "light", "dark"];
       const now = document.documentElement.getAttribute("data-theme") || "auto";
