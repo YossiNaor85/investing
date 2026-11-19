@@ -1,0 +1,20 @@
+Investing UI
+
+Live (the Refresh button works):
+    http://127.0.0.1:8765/#IREN
+    Double-click start-investing-ui.cmd. It starts the UI server and opens the page.
+    Keep its window open while you use the page; close it to stop the server.
+    investing-ui.url opens the same address while the server is running.
+
+Offline (shows the last saved data; Refresh is unavailable):
+    file:///C:/Users/naory/Documents/git/investing/UI/index.html#IREN
+    investing-ui-offline.url opens it.
+
+Deep links: add /1Y, /3M or /1D after the ticker, e.g. #IREN/1D.
+
+The page reads UI\data\, which each asset's pipeline writes (IREN's is
+UI\iren_page\update_iren_page.py). The Refresh button runs the current asset's
+pipeline through UI\server.py.
+
+Add an asset: in Claude Code, type /asset-page TICKER. The skill lives in
+.claude\skills\asset-page\ and uses UI\pipeline\new_page.py.

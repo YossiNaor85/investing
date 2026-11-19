@@ -1,0 +1,18 @@
+{
+  "ticker": "IREN",
+  "name": "IREN Limited",
+  "market": "SPY",
+  "compare": {
+    "SPY": "S&P 500 (SPY)",
+    "SMH": "Semiconductors (SMH)",
+    "BTC-USD": "Bitcoin (BTC-USD)"
+  },
+  "why": {
+    "SPY": "the market",
+    "SMH": "IREN's AI cloud (GPU) business trades with the AI chip complex",
+    "BTC-USD": "bitcoin mining revenue"
+  },
+  "note": "Followed for over a year; the platform is built around it.",
+  "created": "2026-11-19",
+  "updated": "2026-11-19"
+}

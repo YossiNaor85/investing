@@ -1,0 +1,10 @@
+{
+  "assets": [
+    {
+      "ticker": "IREN",
+      "name": "IREN Limited",
+      "pipeline": "iren_page/update_iren_page.py",
+      "added": "2026-11-19"
+    }
+  ]
+}

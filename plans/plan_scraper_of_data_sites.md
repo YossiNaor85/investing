@@ -115,10 +115,10 @@ Phase = when the source gets added (§13). Access details were checked on 2026-1
 | Company newsroom | press releases, events, guidance | the company's own RSS where offered, else a polite page fetch | 1 |
 | Newswires (PR Newswire, Business Wire, GlobeNewswire) | press releases from companies without a usable newsroom feed | industry/subject RSS only, no per-company feeds, so we filter by name; Business Wire and GlobeNewswire block some bots | 1 |
 | Google News RSS search | broad coverage, including headlines from paywalled outlets; regional and language editions | unofficial, free; `when:1d` works; query by name and aliases, never the bare ticker; can return 429 or a CAPTCHA; links are opaque Google tokens (§14) | 1 |
-| Yahoo Finance (`yfinance` 1.8) | headlines, earnings dates, consensus estimates, analyst up/downgrades, daily prices for the price check | unofficial; Yahoo allows personal use only; unpublished throttling | 1 |
+| Yahoo Finance (`yfinance`; 1.2 on our Python 3.9, §10.2) | headlines, earnings dates, consensus estimates, analyst up/downgrades, daily prices for the price check | unofficial; Yahoo allows personal use only; unpublished throttling | 1 |
 | Finnhub company-news | news tagged with tickers, 1 year back (North America only); earnings calendar | free key, 60 calls/min; personal use only. Fallback: Marketaux (free, 100 calls/day, 3 articles per call) | 1 |
 | Massive (formerly Polygon.io) news | ticker-tagged news with per-ticker sentiment, ~2 years back | free key, 5 calls/min | 4 (backfill) |
-| GDELT DOC API | global multilingual news with tone; non-US coverage | free, no key; searchable back to 2017; ≤250 articles per query; ~1 request per 5 s; names only, no tickers | 2 |
+| GDELT DOC API | global multilingual news with tone; non-US coverage | free, no key; searchable back to 2017; ≤250 articles per query; ~1 request per 5 s; names only, no tickers. Degraded in Nov 2026 (missing days), so it's optional until it recovers | 2 |
 | Official sector sources, per profile | biotech: ClinicalTrials.gov, openFDA · government contractors: USAspending · autos: NHTSA recalls · telecom: FCC | free official APIs | 2–3 |
 | Earnings calls | transcripts: management tone, guidance details | paid (FMP has them only on its top plan); some free on company IR sites | 5 |
 | Positioning | 13F institutional holdings (quarterly, ~45-day lag); short interest (twice a month) | SEC 13F data sets; FINRA | 5 |
@@ -341,7 +341,7 @@ Move −3.1% (market −0.8 · domain −2.0 · own −0.3) · volume 1.7× 20d 
 
 ### 10.2 Environment
 
-- **Python 3.12.** `.venv` was rebuilt on 3.12.10 on 2026-11-19, replacing 3.9, which reached end of life in October 2025.
+- **Python 3.9** (decided 2026-11-19; `.venv` runs 3.9.0). 3.9 reached end of life in October 2025, so some packages stop at older releases. A dry run on 2026-11-19 picked yfinance 1.2.0 (current: 1.8.0), numpy 2.0.2, pandas 2.3.3 and exchange_calendars 4.5.6. yfinance matters most: Yahoo changes often, and fixes only ship in new versions. Python 3.12.10 is still installed, so moving later is a quick venv rebuild.
 - **Packages:** httpx, feedparser, pyyaml, pydantic, rapidfuzz (title similarity), python-dateutil, exchange_calendars (NYSE sessions and holidays), yfinance, pandas, numpy. trafilatura (article text extraction) is optional.
 - **`.env`** (already git-ignored): `USER_AGENT="<name> <email>"` (SEC, BLS and the NWS weather API require one), `FRED_API_KEY`, `FINNHUB_API_KEY`. Later: `MASSIVE_API_KEY`, `DATA_GOV_API_KEY` (congress.gov), and a Bluesky app password.
 - **`.gitignore` additions:** `data/` and `.claude/skills/*-workspace/`.
@@ -424,7 +424,7 @@ Each phase ends with something usable.
 
 | Phase | Build | Done when |
 |---|---|---|
-| 0. Groundwork | Python 3.12 venv (done 2026-11-19), `pyproject.toml`, package skeleton, `.env`, `.gitignore` additions | `python -m investing.news --help` works; the test suite runs |
+| 0. Groundwork | Python 3.9 venv (in place), `pyproject.toml`, package skeleton, `.env`, `.gitignore` additions | `python -m investing.news --help` works; the test suite runs |
 | 1. Company-level MVP | resolve; EDGAR, newsroom/newswire, Google News, Yahoo and Finnhub collectors (Finnhub also backfills a year of news); normalize, dedupe, sessions, store; SKILL.md + weighting.md; digest v1; profile v0 (identity + search terms); daily collection for the test tickers starts; first eval cases | `/asset-news NVDA` gives a digest whose top stories you agree with on 3 days in a row, and it contains every 8-K filed that week |
 | 2. Profile + domain level | full profiles drafted by Claude; peer/supplier/customer events; domain ETFs; Federal Register; industry sources; GDELT; trend stories | a peer's or customer's material event shows up in NVDA's digest with the right link and direction |
 | 3. Macro + calendar | shared daily macro pass: Fed, FRED release dates, BLS/BEA, Treasury, policy feeds, geopolitics, Polymarket/Kalshi; `events` filled from schedules and from dates in the news | the next 2 weeks of releases and the next earnings date are in `events`; one macro surprise reaches every affected ticker's digest from a single collection |

@@ -12,6 +12,7 @@ venv.bak/
 
 
 #folders
+UI/data/
 
 #extensions
 .xml

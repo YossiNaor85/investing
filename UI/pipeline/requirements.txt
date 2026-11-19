@@ -1,0 +1,5 @@
+# Packages for the asset-page pipelines, pinned to what resolves on the project's Python 3.9.
+# Install: .venv\Scripts\python.exe -m pip install -r UI\pipeline\requirements.txt
+yfinance==1.2.0
+pandas==2.3.3
+numpy==2.0.2

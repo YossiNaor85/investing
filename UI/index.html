@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Investing</title>
+  <link rel="stylesheet" href="static/styles.css">
+  <script>
+    // Apply a saved theme before the first paint (Auto follows the system setting).
+    try {
+      var saved = localStorage.getItem("investing-theme");
+      if (saved === "light" || saved === "dark") document.documentElement.setAttribute("data-theme", saved);
+    } catch (e) { /* storage unavailable: stay on Auto */ }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">Investing</span>
+      <span class="brand-sub">Connect the dots</span>
+    </div>
+    <div class="topbar-actions">
+      <span id="refresh-status" class="status" role="status" aria-live="polite"></span>
+      <button id="refresh-button" class="btn" type="button">Refresh</button>
+      <div class="menu-wrap">
+        <button id="assets-button" class="btn btn-primary" type="button"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="assets-menu">
+          Your assets <span class="caret" aria-hidden="true">▾</span>
+        </button>
+        <div id="assets-menu" class="menu" role="menu" aria-label="Assets we follow" hidden></div>
+      </div>
+      <button id="theme-button" class="btn btn-ghost" type="button">Theme: Auto</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="empty-state" class="empty">
+      <h1>Choose an asset</h1>
+      <p>Open <strong>Your assets</strong> and pick one to see its trading points, financial ratios and econometric measures.</p>
+    </section>
+
+    <section id="missing-state" class="empty" hidden>
+      <h1 id="missing-title">No data yet</h1>
+      <p>Press <strong>Refresh</strong> (with the UI server running), or run:</p>
+      <pre><code>.venv\Scripts\python.exe UI\iren_page\update_iren_page.py</code></pre>
+    </section>
+
+    <section id="asset-view" hidden>
+      <div class="asset-head">
+        <div class="asset-id">
+          <h1 id="asset-title"></h1>
+          <p id="asset-sub" class="muted"></p>
+          <p id="asset-note" class="muted small asset-note" hidden></p>
+        </div>
+        <div class="quote">
+          <div id="quote-price" class="hero"></div>
+          <div id="quote-change" class="quote-change"></div>
+          <div id="quote-meta" class="muted small"></div>
+        </div>
+      </div>
+
+      <div id="kpis" class="kpis"></div>
+
+      <div class="filter-row">
+        <span class="filter-label" id="window-label">Window</span>
+        <div class="segmented" role="group" aria-labelledby="window-label">
+          <button type="button" data-window="1Y" aria-pressed="true">1 year</button>
+          <button type="button" data-window="3M" aria-pressed="false">3 months</button>
+          <button type="button" data-window="1D" aria-pressed="false">1 day</button>
+        </div>
+      </div>
+
+      <section class="card chart-card">
+        <h2 id="chart-title">Trading points</h2>
+        <p id="chart-sub" class="muted small"></p>
+        <div id="chart-legend" class="legend"></div>
+        <div id="chart" class="chart" tabindex="0"
+             aria-describedby="chart-help"></div>
+        <p id="chart-help" class="muted small chart-help">Hover, or focus the chart and use the arrow keys, to read each point.</p>
+        <div class="card-foot">
+          <button id="table-toggle" class="btn btn-ghost btn-small" type="button"
+                  aria-expanded="false" aria-controls="chart-table">Show table</button>
+        </div>
+        <div id="chart-table" class="table-wrap" hidden></div>
+      </section>
+
+      <div class="panels">
+        <section class="card">
+          <h2>Financial ratios</h2>
+          <div id="ratios"></div>
+        </section>
+        <section class="card">
+          <h2>Econometric measures</h2>
+          <div id="econ"></div>
+        </section>
+      </div>
+
+      <div id="warnings" class="warnings" hidden></div>
+      <p id="source" class="muted small source"></p>
+    </section>
+  </main>
+
+  <script src="static/app.js"></script>
+</body>
+</html>
