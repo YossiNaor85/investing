@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Investing</title>
-  <link rel="stylesheet" href="static/styles.css?v=13">
+  <link rel="stylesheet" href="static/styles.css?v=14">
   <script>
     // Apply a saved theme before the first paint (Auto follows the system setting).
     try {
@@ -171,6 +171,21 @@
         </section>
       </section>
 
+      <!-- Share values: a box for each source of values -->
+      <section id="view-values" class="view" hidden>
+        <div id="values-boxes" class="boxes boxes-two"></div>
+      </section>
+
+      <!-- What a share would be worth valued by each fundamental in the last quarterly report -->
+      <section id="view-values-report" class="view" hidden>
+        <section class="card wide-card">
+          <h2>Share values · last quarterly report</h2>
+          <p id="values-sub" class="muted small"></p>
+          <div id="values-table" class="table-wrap table-page"></div>
+          <p id="values-notes" class="muted small values-notes"></p>
+        </section>
+      </section>
+
       <!-- News, Info and Connect the dots: empty for now -->
       <section id="view-empty" class="view" hidden>
         <section class="card placeholder">
@@ -184,6 +199,6 @@
     </section>
   </main>
 
-  <script src="static/app.js?v=12"></script>
+  <script src="static/app.js?v=14"></script>
 </body>
 </html>

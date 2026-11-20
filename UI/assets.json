@@ -5,18 +5,6 @@
       "name": "IREN Limited",
       "pipeline": "asset/iren_page/update_iren_page.py",
       "added": "2026-11-19"
-    },
-    {
-      "ticker": "OKTA",
-      "name": "Okta, Inc.",
-      "pipeline": "asset/okta_page/update_okta_page.py",
-      "added": "2026-11-20"
-    },
-    {
-      "ticker": "AAPL",
-      "name": "Apple Inc.",
-      "pipeline": "asset/aapl_page/update_aapl_page.py",
-      "added": "2026-11-20"
     }
   ]
 }

@@ -34,6 +34,11 @@ The `.js` file holds the same object, assigned to `window.INVESTING_DATA["<TICKE
 
 The Analysts group in `ratios` has `"id": "analysts"`; the page adds its button to the rating changes page there.
 
+**Share values** (`share_values?`, stocks only): `{quarter_end, shares, price, rows, skipped, notes}`, built by `UI/pipeline/share_values.py` from the last quarterly report, no AI.
+- A row is `{id, fundamental, per_share, multiple, multiple_label, value, vs_price, side, sentiment, why}`, lowest `value` first.
+- `side` is bears, neutral or bulls. It comes, with `sentiment` and `why`, from `UI/pipeline/bull_bear_dictionary.json`, the same for every asset.
+- `vs_price` is null when `value` is zero or less. `skipped` lists fundamentals that were zero or negative. `shares` is the report's count at the quarter's end.
+
 **Item:** `{label, value, fmt, note?, hint?}`
 - `note` shows under the value; `hint` shows under the label.
 - `value` is null when unknown, and the page shows "—".

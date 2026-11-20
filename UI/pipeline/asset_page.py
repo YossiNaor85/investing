@@ -751,6 +751,15 @@ def build(cfg: dict, customize: Optional[Customize] = None, page_dir: Optional[P
         actions = analyst_actions(ticker, page_dir / KEPT_TABLE)
         if actions:
             data["analyst_actions"] = actions
+    if kind == "EQUITY":
+        try:
+            from pipeline import share_values  # reads Yahoo's quarterly reports; no AI
+            values = share_values.report_values(ticker, info, current, market, compare)
+        except Exception as exc:
+            values = None
+            warnings.append(f"Share values couldn't be figured this time: {exc}")
+        if values:
+            data["share_values"] = values
     if customize:
         ctx = {"config": cfg, "info": info, "history": hist, "intraday": day, "compare": compare_close}
         data = customize(data, ctx) or data

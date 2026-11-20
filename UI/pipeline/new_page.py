@@ -309,10 +309,10 @@ def cmd_check(args) -> int:
     if edge and not args.no_screenshots:
         out_dir = ui / "data" / "_checks"
         out_dir.mkdir(parents=True, exist_ok=True)
-        # The first page, the graphs (1 year and 1 day), the ratios and the analyst rating changes.
+        # The first page, the graphs (1 year and 1 day), the ratios, the analyst rating changes, the share values.
         views = [("overview", "", "1280,900"), ("graphs-1Y", "/graphs/1Y", "1280,1500"),
                  ("graphs-1D", "/graphs/1D", "1280,1500"), ("ratios", "/ratios", "1280,1300"),
-                 ("ratings", "/ratings", "1280,1300")]
+                 ("ratings", "/ratings", "1280,1300"), ("values", "/values-report", "1280,1300")]
         for name, route, size in views:
             out = out_dir / f"{ticker}-{name}.png"
             url = (ui / "index.html").as_uri() + f"#{ticker}{route}"

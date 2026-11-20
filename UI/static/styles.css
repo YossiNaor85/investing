@@ -325,6 +325,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; transition: o
 
 .table-tall { max-height: 560px; }
 .table-page { max-height: calc(100vh - 220px); min-height: 320px; }
+.boxes.boxes-two { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 880px; }
+.values-table td.why { white-space: normal; min-width: 260px; }
+.values-table .value-cell { font-weight: 600; }
+.values-today th, .values-today td { font-weight: 700; background: var(--hover); }
+.values-notes { margin-top: 10px; }
 .group-link { display: inline-block; margin-top: 12px; text-decoration: none; }
 .analyst-table th, .analyst-table td { vertical-align: top; }
 .analyst-table td.why { white-space: normal; min-width: 300px; }
@@ -360,6 +365,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; transition: o
   .card { padding: 14px; }
   .panels { grid-template-columns: 1fr; }
   .menu { right: auto; left: 0; min-width: 0; width: calc(100vw - 32px); }
-  .boxes.boxes-home { grid-template-columns: 1fr; }
+  .boxes.boxes-home, .boxes.boxes-two { grid-template-columns: 1fr; }
   .watchlist th, .watchlist td { padding-right: 12px; }
 }

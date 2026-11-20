@@ -22,18 +22,22 @@
     graphs: "Graphs",
     ratios: "Fundamental ratios",
     ratings: "Analyst rating changes",
+    values: "Share values",
+    "values-report": "Last quarterly report",
+    "values-news": "News projections",
     news: "News",
     info: "Info",
     analyst: "Connect the dots",
     sentiment: "Sentiment compass",
   };
-  const EMPTY_VIEWS = ["news", "info", "analyst", "sentiment"];
-  const PARENT_VIEW = { ratings: "ratios" };  // a page opened from another page, for the breadcrumb
+  const EMPTY_VIEWS = ["news", "info", "analyst", "sentiment", "values-news"];
+  const PARENT_VIEW = { ratings: "ratios", "values-report": "values", "values-news": "values" };  // for the breadcrumb
   const PAGES = { home: "Home", watchlist: "My watchlist", thoughts: "My thoughts" };  // pages besides the assets
   const THOUGHTS_FILE = "my_thoughts.md";  // UI/my_thoughts.md, written by hand
   const BOXES = [
     { view: "graphs", title: "Graphs", text: "Trading points over 1 year, 3 months and 1 day, with volume and the econometric measures." },
     { view: "ratios", title: "Fundamental ratios", text: "Valuation, profitability, growth, balance sheet, ownership and analysts." },
+    { view: "values", title: "Share values", text: "What a share would be worth valued by each fundamental, from the bears' floors to the bulls' growth multiples." },
     { view: "news", title: "News", text: "Company, domain and macro news.", soon: true },
     { view: "info", title: "Info", text: "The business, its domain, peers and plans.", soon: true },
     { view: "analyst", title: "Connect the dots", text: "The analyst's story: why it moves and what to watch.", soon: true },
@@ -505,6 +509,7 @@
       ? h("a", { class: "btn btn-small group-link", href: hashFor(data.ticker, "ratings") }, "Rating changes, past year \u2192")
       : null);
     renderAnalystTable(data.analyst_actions);
+    renderValues(data);
     renderGroups($("econ"), data.econometrics);
     renderFooter(data);
     showView();
@@ -603,7 +608,7 @@
   /** Show the current view's section; the chart is drawn only once its section is visible. */
   function showView() {
     const v = state.view;
-    for (const name of ["overview", "graphs", "ratios", "ratings"]) $("view-" + name).hidden = v !== name;
+    for (const name of ["overview", "graphs", "ratios", "ratings", "values", "values-report"]) $("view-" + name).hidden = v !== name;
     $("view-empty").hidden = !EMPTY_VIEWS.includes(v);
     $("placeholder-title").textContent = VIEWS[v];
     // My watchlist › IREN › Fundamental ratios; on the asset's first page, My watchlist › IREN
@@ -662,7 +667,97 @@
       return h("dl", { class: "box-facts" }, ...items.map((it) =>
         h("div", {}, h("dt", { text: it.label }), h("dd", { text: format(it.value, it.fmt) }))));
     }
+    if (view === "values") return valuesFacts(d);
     return null;
+  }
+
+  /** Lowest value, today's price and highest value, for a box. */
+  function valuesFacts(d) {
+    const rows = ((d.share_values || {}).rows || []).filter((r) => r.value > 0);
+    if (!rows.length) return null;
+    const fact = (label, v) => h("div", {}, h("dt", { text: label }), h("dd", { text: format(v, "money") }));
+    return h("dl", { class: "box-facts" }, fact("Lowest value", rows[0].value),
+      isNum((d.quote || {}).price) ? fact("Today's price", d.quote.price) : null,
+      fact("Highest value", rows[rows.length - 1].value));
+  }
+
+  // ------------------------------------------------------------ share values
+
+  /** The Share values page: a box for each source of values. */
+  function renderValues(d) {
+    const sv = d.share_values;
+    const host = $("values-boxes");
+    host.textContent = "";
+    host.append(
+      h("a", { class: "box", href: hashFor(d.ticker, "values-report") },
+        h("div", { class: "box-head" }, h("h3", { class: "box-title", text: "Last quarterly report" })),
+        h("p", { class: "box-text", text: sv && sv.quarter_end
+          ? "What a share would be worth valued by each fundamental in the report for the quarter ended " + formatDate(sv.quarter_end) + "."
+          : "No quarterly report from Yahoo for this asset." }),
+        valuesFacts(d)),
+      h("a", { class: "box box-soon", href: hashFor(d.ticker, "values-news") },
+        h("div", { class: "box-head" },
+          h("h3", { class: "box-title", text: "News projections" }),
+          h("span", { class: "badge", text: "Coming soon" })),
+        h("p", { class: "box-text", text: "Values implied by what the news projects: guidance, deals and analysts' forecasts." })));
+    renderValuesTable(d);
+  }
+
+  /** Every value, lowest first, with today's price in its place among them. */
+  function renderValuesTable(d) {
+    const sv = d.share_values;
+    const host = $("values-table");
+    host.textContent = "";
+    const rows = (sv && sv.rows) || [];
+    const price = (d.quote || {}).price;
+    $("values-sub").textContent = sv && sv.quarter_end
+      ? "The report for the quarter ended " + formatDate(sv.quarter_end) + ": what one share would be worth if the market " +
+        "valued the company by a single fundamental, lowest first, with today's price among them. Who: the side that " +
+        "argues for that value. Sentiment: the market mood that would take the price there."
+      : "No quarterly report from Yahoo for this asset.";
+    const notes = [];
+    if (sv && (sv.skipped || []).length) {
+      notes.push("Not shown, because they were zero or negative over the last four quarters: " + sv.skipped.join(", ") + ".");
+    }
+    for (const n of (sv && sv.notes) || []) notes.push(n);
+    if (rows.some((r) => r.value < 0)) {
+      notes.push("A value below zero means the company's debt is larger than what that measure gives the business, leaving nothing for shareholders.");
+    }
+    if (sv && isNum(sv.shares)) notes.push("Per share: the report's " + format(sv.shares, "int_compact") + " shares at the quarter's end.");
+    $("values-notes").textContent = notes.join(" ");
+    if (!rows.length) return;
+    const todayRow = () => h("tr", { class: "values-today" },
+      h("th", { scope: "row", text: "Today's price" }), h("td"), h("td"),
+      h("td", { class: "num", text: format(price, "money") }), h("td"), h("td"),
+      h("td", { class: "why", text: "Where the market prices it now" }));
+    const tbody = h("tbody");
+    let placed = !isNum(price);
+    for (const r of rows) {
+      if (!placed && r.value > price) { tbody.append(todayRow()); placed = true; }
+      tbody.append(h("tr", {},
+        h("th", { scope: "row", text: r.fundamental }),
+        h("td", { class: "num nowrap", text: format(r.per_share, "money") }),
+        h("td", { class: "nowrap", text: r.multiple_label }),
+        h("td", { class: "num nowrap value-cell", text: format(r.value, "money") }),
+        h("td", { class: "num nowrap", text: isNum(r.vs_price) ? format(r.vs_price, "pct_signed") : DASH }),
+        sideCell(r),
+        h("td", { class: "why", text: r.sentiment })));
+    }
+    if (!placed) tbody.append(todayRow());
+    host.append(h("table", { class: "data-table values-table" },
+      h("caption", { class: "sr-only", text: "Share values from the last quarterly report, lowest first" }),
+      h("thead", {}, h("tr", {}, ...["Valued by", "Per share", "Multiple", "Share value", "vs today", "Who", "Sentiment"].map((x) =>
+        h("th", { scope: "col", class: ["Per share", "Share value", "vs today"].includes(x) ? "num" : null, text: x })))),
+      tbody));
+  }
+
+  /** Bears ▼, Neutral, Bulls ▲; the dictionary's reason shows on hover. */
+  function sideCell(r) {
+    const label = { bears: "Bears", neutral: "Neutral", bulls: "Bulls" }[r.side] || r.side;
+    const dir = r.side === "bulls" ? "up" : r.side === "bears" ? "down" : "";
+    return h("td", { class: "nowrap", title: r.why || null },
+      dir ? h("span", { class: "delta " + dir, "aria-hidden": "true", text: dir === "up" ? "\u25b2 " : "\u25bc " }) : null,
+      label);
   }
 
   function sparkline(values) {

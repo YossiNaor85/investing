@@ -23,6 +23,12 @@ Pages:
     #IREN/graphs/1Y       graphs (also /3M and /1D)
     #IREN/ratios          fundamental ratios
     #IREN/ratings         analyst rating changes, with the reasons
+    #IREN/values          Share values: a Last quarterly report box and News projections (soon)
+    #IREN/values-report   what a share would be worth valued by each fundamental in the last
+                          quarterly report, from bears to bulls (no AI). Who is a bear or a bull
+                          for each value comes from UI\pipeline\bull_bear_dictionary.json, the same
+                          for every asset; an expert's review copy is in
+                          .claude\skills\share_values\references\bull-bear-dictionary.md.
     #IREN/news, #IREN/info, #IREN/analyst, #IREN/sentiment   empty for now
 
 The page reads UI\data\, which each asset's pipeline writes (IREN's is

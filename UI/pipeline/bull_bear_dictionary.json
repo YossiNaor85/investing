@@ -1,0 +1,148 @@
+{
+  "about": "Which side each share value belongs to (bears, neutral or bulls), with the multiple, the market mood that would take the price there, and why. UI/pipeline/share_values.py reads this file, so the same link applies to every asset. It is written for review by an expert: change a side, a multiple or a reason here, and every asset's next update uses it.",
+  "sides": {
+    "bears": "The pessimistic case: a low valuation, the kind bears argue for in a sell-off.",
+    "neutral": "An ordinary market: the shares valued at market or sector norms.",
+    "bulls": "The optimistic case: a high valuation, the kind bulls argue for in a rally."
+  },
+  "fundamentals": {
+    "net_cash": "Cash and short-term investments minus all debt, at the end of the last quarter, per share.",
+    "tangible_book": "Shareholders' equity minus goodwill and other intangible assets, at the end of the last quarter, per share.",
+    "book": "Shareholders' equity at the end of the last quarter, per share.",
+    "revenue": "Revenue over the last four quarters, per share.",
+    "revenue_pace": "Revenue of the last quarter times four, per share.",
+    "earnings": "Net income to common shareholders over the last four quarters, per share.",
+    "ebitda": "EBITDA without one-off items over the last four quarters, per share. Its value is the enterprise value (EBITDA times the multiple) minus net debt.",
+    "fcf": "Free cash flow (operating cash flow minus capital spending) over the last four quarters, per share."
+  },
+  "values": [
+    {
+      "id": "net_cash",
+      "fundamental": "net_cash",
+      "multiple": 1,
+      "side": "bears",
+      "sentiment": "Capitulation: only the cash left after paying all debt counts",
+      "why": "Gives the business itself no value: only cash net of every debt remains. It is the liquidation floor bears point to in a panic."
+    },
+    {
+      "id": "tangible_book",
+      "fundamental": "tangible_book",
+      "multiple": 1,
+      "side": "bears",
+      "sentiment": "Crash: priced at its tangible assets alone",
+      "why": "Counts only tangible net assets, treats goodwill and intangibles as worthless and adds nothing for earning power: a distressed-sale view."
+    },
+    {
+      "id": "book",
+      "fundamental": "book",
+      "multiple": 1,
+      "side": "bears",
+      "sentiment": "Deep pessimism: priced at book value, as in a sell-off",
+      "why": "A price-to-book of 1 says the business is worth only its accounting net assets, far below the market's usual 3 to 5 times book: the classic bear floor."
+    },
+    {
+      "id": "revenue_bears",
+      "fundamental": "revenue",
+      "multiple": 1,
+      "side": "bears",
+      "sentiment": "Pessimism: each dollar of yearly revenue priced at a dollar",
+      "why": "One times revenue is below the S&P 500's long-run price-to-sales of about 1.5 to 2 and well below its recent level near 3: priced like a low-margin or shrinking business."
+    },
+    {
+      "id": "revenue_market",
+      "fundamental": "revenue",
+      "multiple": 3,
+      "side": "neutral",
+      "sentiment": "An ordinary market: revenue valued near the S&P 500's recent multiple",
+      "why": "About three times revenue is where the S&P 500 as a whole has traded in recent years: neither a discount nor a premium."
+    },
+    {
+      "id": "revenue_bulls",
+      "fundamental": "revenue_pace",
+      "multiple": 10,
+      "side": "bulls",
+      "sentiment": "Growth enthusiasm: the newest quarter's pace, at a growth-stock multiple",
+      "why": "Two optimistic choices at once: the latest quarter's revenue annualized, as if growth holds, and a price-to-sales of 10, which only fast growers command."
+    },
+    {
+      "id": "earnings_bears",
+      "fundamental": "earnings",
+      "multiple": 12,
+      "side": "bears",
+      "sentiment": "Pessimism: earnings priced like a value stock",
+      "why": "A P/E of 12 is below the S&P 500's long-run average of about 16 and its recent 20 to 25: the multiple of a stock the market expects little from."
+    },
+    {
+      "id": "earnings_market",
+      "fundamental": "earnings",
+      "multiple": "market_pe",
+      "side": "neutral",
+      "sentiment": "An ordinary market: earnings valued like the S&P 500 today",
+      "why": "The S&P 500's own trailing P/E today, live from Yahoo (SPY): the average stock's multiple, neutral by definition."
+    },
+    {
+      "id": "earnings_sector",
+      "fundamental": "earnings",
+      "multiple": "sector_pe",
+      "side": "neutral",
+      "sentiment": "In step with its sector: earnings valued like its sector today",
+      "why": "The trailing P/E of the asset's sector ETF today (its comparison series), live from Yahoo: valued like its peers, no better and no worse."
+    },
+    {
+      "id": "earnings_bulls",
+      "fundamental": "earnings",
+      "multiple": 35,
+      "side": "bulls",
+      "sentiment": "Optimism: a growth premium on earnings",
+      "why": "A P/E of 35 is well above the market's: investors pay it only when they expect earnings to grow fast for years."
+    },
+    {
+      "id": "ebitda_bears",
+      "fundamental": "ebitda",
+      "multiple": 8,
+      "side": "bears",
+      "sentiment": "Pessimism: operating earnings at a low multiple",
+      "why": "An enterprise value of 8 times EBITDA is below the market's usual 12 to 16: priced like a mature or troubled business."
+    },
+    {
+      "id": "ebitda_market",
+      "fundamental": "ebitda",
+      "multiple": 14,
+      "side": "neutral",
+      "sentiment": "An ordinary market: operating earnings at a typical multiple",
+      "why": "About 14 times EBITDA is close to the S&P 500's average in recent years, around 12 to 16."
+    },
+    {
+      "id": "ebitda_bulls",
+      "fundamental": "ebitda",
+      "multiple": 25,
+      "side": "bulls",
+      "sentiment": "Optimism: operating earnings at a growth multiple",
+      "why": "25 times EBITDA is a growth-company multiple, paid when investors expect operating earnings to rise fast."
+    },
+    {
+      "id": "fcf_bears",
+      "fundamental": "fcf",
+      "multiple": 12,
+      "side": "bears",
+      "sentiment": "Pessimism: free cash flow priced to yield about 8%",
+      "why": "12 times free cash flow is a free-cash-flow yield of about 8%, roughly double the market's: the price of a stock investors distrust."
+    },
+    {
+      "id": "fcf_market",
+      "fundamental": "fcf",
+      "multiple": 22,
+      "side": "neutral",
+      "sentiment": "An ordinary market: free cash flow priced to yield about 4.5%",
+      "why": "22 times free cash flow, a yield of about 4.5%, is close to the market's long-run free-cash-flow yield of 4 to 5%."
+    },
+    {
+      "id": "fcf_bulls",
+      "fundamental": "fcf",
+      "multiple": 40,
+      "side": "bulls",
+      "sentiment": "Optimism: free cash flow priced to yield 2.5%, paying for growth",
+      "why": "40 times free cash flow, a 2.5% yield, makes sense only if the cash flow is expected to grow fast."
+    }
+  ]
+}

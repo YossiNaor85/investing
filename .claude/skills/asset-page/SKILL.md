@@ -30,6 +30,8 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 | `#<TICKER>/graphs/1Y` | the graphs (also `/3M` and `/1D`) and the econometric measures |
 | `#<TICKER>/ratios` | the fundamental ratios |
 | `#<TICKER>/ratings` | the analyst rating changes of the past year, with reasons; opened from the Analysts box on the ratios page |
+| `#<TICKER>/values` | Share values: a Last quarterly report box and a News projections box (coming soon) |
+| `#<TICKER>/values-report` | what a share would be worth valued by each fundamental in the last quarterly report, bears to bulls (the `share_values` skill) |
 | `#<TICKER>/news`, `/info`, `/analyst`, `/sentiment` | empty for now |
 
 ## Steps
@@ -67,6 +69,7 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
    - the graphs are drawn (1 year and 1 day)
    - the ratios page is filled in
    - the rating changes page lists the analyst updates (stocks)
+   - the share values table is filled in (stocks)
    - no labels collide
 
    `empty_values` lists the ratios Yahoo didn't provide. Gaps are normal for ETFs and young companies; tell the user which missing ones matter.
