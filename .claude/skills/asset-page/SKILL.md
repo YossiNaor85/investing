@@ -1,6 +1,6 @@
 ---
 name: asset-page
-description: Adds a stock or ETF to the investing UI. It creates the asset's page and the Python pipeline that builds and refreshes it, registers it under "Your assets", runs it once and checks the result. Use when the user asks to add, create, build or set up a page, pipeline or tracking in the UI for a ticker or company (e.g. "add NVDA", "make a page for TEVA"), or to rebuild an existing asset page.
+description: Adds a stock or ETF to the investing UI. It creates the asset's page and the Python pipeline that builds and refreshes it, registers it under My watchlist, runs it once and checks the result. Use when the user asks to add, create, build or set up a page, pipeline or tracking in the UI for a ticker or company (e.g. "add NVDA", "make a page for TEVA"), or to rebuild an existing asset page.
 argument-hint: "<TICKER> [--rebuild]"
 shell: powershell
 allowed-tools: PowerShell(.\.venv\Scripts\python.exe UI\pipeline\new_page.py *), Bash(.venv/Scripts/python.exe UI/pipeline/new_page.py *)
@@ -14,16 +14,18 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 
 | Path | What it is |
 |---|---|
-| `UI/asset/<slug>_page/config.json` | the asset's settings: its comparison series, and why each matters |
+| `UI/asset/<slug>_page/config.json` | the asset's settings: its comparison series and why each matters, and its domain |
 | `UI/asset/<slug>_page/update_<slug>_page.py` | its pipeline: it calls the shared engine `UI/pipeline/asset_page.py`, and has a `customize()` hook for changes only this asset needs |
 | `UI/asset/<slug>_page/analyst_table.json` | the kept analyst table, with each change's reason (stocks). `rating_change_cause_searcher` and `UI/pipeline/rating_causes.py` keep it; the pipeline only reads it. |
-| `UI/assets.json` | "Your assets", in order (IREN first) |
+| `UI/assets.json` | My watchlist (the page sorts it by domain, then A to Z) |
 | `UI/data/<TICKER>.js` and `.json` | the page's data, rewritten by every run (git-ignored) |
 
 `<slug>` is the ticker in lowercase, with other characters turned into `_` (BRK-B → `brk_b`). The page itself is the shared `UI/index.html`, which shows any registered ticker:
 
 | Address | What it shows |
 |---|---|
+| `#` | the site's first page: My thoughts (`UI/my_thoughts.md`) and My watchlist |
+| `#watchlist` | My watchlist: a table of Ticker, Asset, Domain and Remove (a ✕), sorted by domain, then A to Z |
 | `#<TICKER>` | the asset's first page: headline tiles, plus a box for each section |
 | `#<TICKER>/graphs/1Y` | the graphs (also `/3M` and `/1D`) and the econometric measures |
 | `#<TICKER>/ratios` | the fundamental ratios |
@@ -49,15 +51,17 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
    - at most one driver of its business
 
    `suggested_compare` comes from Yahoo's classification and is only a starting point. Write a short reason for each series; the page shows it.
+
+   Also name the asset's **domain**: its business theme in one to three words, as My watchlist shows it, such as Data centers, Cybersecurity, Semiconductors or Bitcoin mining. Take it from the company's own description (`business` in the inspect output), not from Yahoo's sector and industry, which lag behind pivots: IREN and Cipher build AI data centers, but Yahoo still files IREN under Capital Markets. Reuse a domain the watchlist already has when it fits.
 4. **Create.** Run:
 
-   `.\.venv\Scripts\python.exe UI\pipeline\new_page.py create <TICKER> --compare "<SYMBOL>=<Label>" --why "<SYMBOL>=<reason>" [more --compare / --why] [--note "<line under the name>"] [--rebuild]`
+   `.\.venv\Scripts\python.exe UI\pipeline\new_page.py create <TICKER> --compare "<SYMBOL>=<Label>" --why "<SYMBOL>=<reason>" [more --compare / --why] --domain "<domain>" [--note "<line under the name>"] [--rebuild]`
 
    - SPY is added as the market unless `--market` names another.
    - Use `--note` only for something the user said about the asset, such as why they follow it.
    - `--rebuild` rewrites the config but keeps the script and its `customize()` code. Without `--compare`, it also keeps the current series. Add `--new-script` to regenerate the script from the template; that drops any `customize()` code.
 
-   The command registers the asset at the end of Your assets, runs the first update and prints the result. If the update fails, report the error instead of retrying in a loop.
+   The command adds the asset to My watchlist, runs the first update and prints the result. If the update fails, report the error instead of retrying in a loop.
 5. **Check.** Run `.\.venv\Scripts\python.exe UI\pipeline\new_page.py check <TICKER>`, then Read the screenshots it lists and confirm:
    - the first page shows the six boxes
    - the graphs are drawn (1 year and 1 day)
@@ -76,7 +80,7 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 
 ## Rules
 
-- The UI's **Add asset** button doesn't use this skill or any AI. It runs `new_page.py create <TICKER> --auto` (or `restore`), which picks the comparison series by fixed rules. Use this skill when the user wants Claude to choose the series or customize a page; `--rebuild` with your own `--compare` replaces the automatic choice. Once the page is built, the UI server compares its analyst table with the kept one and starts `rating_change_cause_searcher` in the background for the changes; that's the only AI the buttons start.
+- The UI's **Add asset** button doesn't use this skill. It runs `new_page.py create <TICKER> --auto` (or `restore`), which picks the comparison series by fixed rules. Use this skill when the user wants Claude to choose the series or customize a page; `--rebuild` with your own `--compare` replaces the automatic choice. Once the page is built, the UI server works in the background. Claude names the asset's domain once from the company's description (`UI/pipeline/asset_domain.py`, no tools), then `rating_change_cause_searcher` finds the reasons behind its analyst changes. Those are the only AI runs the buttons start; `AUTO_AI = False` in `UI/server.py` turns them off.
 - Only add tickers the user asked for.
 - Don't edit `UI/pipeline/asset_page.py` to suit one asset; that changes every page. One-asset changes go in that asset's `customize()` (see `${CLAUDE_SKILL_DIR}/references/customizing.md`).
 - If you change what the pipeline writes, follow `${CLAUDE_SKILL_DIR}/references/page-contract.md`, and update `UI/static/app.js` in the same change.

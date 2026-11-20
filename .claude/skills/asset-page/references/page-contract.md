@@ -11,6 +11,7 @@ The `.js` file holds the same object, assigned to `window.INVESTING_DATA["<TICKE
 | schema | int | currently 1 |
 | ticker, name, kind | str | kind is Yahoo's quoteType (EQUITY, ETF, …) |
 | exchange, currency, classification, note | str or null | currency is the trading currency; it sets the money formats |
+| domain | str or null | the asset's domain, shown on My watchlist: `domain` in its config.json, else Yahoo's industry (a fund's category) |
 | updated_at | ISO time, UTC | |
 | source | str | shown in the footer |
 | compare | list of {symbol, label, why} | the comparison series |

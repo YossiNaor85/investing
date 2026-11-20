@@ -15,7 +15,7 @@ yfinance), computes financial ratios and econometric measures, and writes:
     UI/data/<TICKER>.js      what UI/index.html reads. It's a <script> file, so the
                              page also works when opened straight from disk.
     UI/data/<TICKER>.json    the same data as plain JSON
-    UI/data/assets.js        the "Your assets" list, built from UI/assets.json
+    UI/data/assets.js        My watchlist, built from UI/assets.json
 
 The data format is described in .claude/skills/asset-page/references/page-contract.md.
 A change here changes every page, so keep UI/static/app.js in step with it.
@@ -128,7 +128,7 @@ def short_label(label: str) -> str:
 # --------------------------------------------------------------- registry
 
 def load_registry(ui_dir: Path) -> list:
-    """The followed assets, in "Your assets" order, from UI/assets.json."""
+    """The followed assets (My watchlist), from UI/assets.json. The page sorts them by domain, then A to Z."""
     path = ui_dir / "assets.json"
     if not path.exists():
         return []
@@ -140,7 +140,7 @@ def save_registry(ui_dir: Path, assets: list) -> None:
 
 
 def write_assets(ui_dir: Path) -> None:
-    """Rewrite UI/data/assets.js, the list behind the "Your assets" button."""
+    """Rewrite UI/data/assets.js, the list behind My watchlist."""
     data_dir = ui_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     out = []
@@ -151,7 +151,8 @@ def write_assets(ui_dir: Path) -> None:
         if path.exists():
             d = json.loads(path.read_text(encoding="utf-8-sig"))
             q = d.get("quote") or {}
-            entry.update(name=d.get("name") or entry["name"], has_data=True, price=q.get("price"),
+            domain = d.get("domain") or (d.get("classification") or "").replace("Yahoo: ", "", 1) or None
+            entry.update(name=d.get("name") or entry["name"], has_data=True, domain=domain, price=q.get("price"),
                          change_pct=q.get("change_pct"), currency=d.get("currency"), updated_at=d.get("updated_at"))
         out.append(entry)
     write_atomic(data_dir / "assets.js",
@@ -461,6 +462,7 @@ def basic_ratios(info: dict) -> list:
 # skill (UI/pipeline/rating_causes.py keeps the file). The update below only reads it.
 # A change is a new rating or a new price target; a plain reiteration needs no reason.
 KEPT_TABLE = "analyst_table.json"
+FACTS = ("date", "firm", "action", "rating", "previous", "prior_target", "target", "rating_changed", "target_changed")
 ACTIONS = {"up": "upgrade", "down": "downgrade", "init": "new coverage", "main": "maintained", "reit": "reiterated"}
 
 
@@ -526,20 +528,26 @@ def analyst_actions(ticker: str, kept_path: Path) -> Optional[dict]:
     gets its reason from the kept table. Nothing is searched here, so an update stays
     quick and calls no AI. Changes not looked into yet count as pending."""
     table = rating_changes(ticker)
-    if not table:
-        return None
     kept = load_kept(kept_path)
+    if not table and not kept:
+        return None
+    since = table["since"] if table else f"{pd.Timestamp.now() - pd.Timedelta(days=365):%Y-%m-%d}"
+    by_id = {r["id"]: r for r in (table["rows"] if table else [])}
+    # Yahoo sometimes leaves a recent row out of an answer; the kept table still has it.
+    for cid, k in kept.items():
+        if cid not in by_id and (k.get("date") or "") >= since:
+            by_id[cid] = dict(k, id=cid)
     rows = []
-    for yahoo_row in table["rows"]:
-        row = {k: v for k, v in yahoo_row.items() if k != "id"}
+    for source_row in sorted(by_id.values(), key=lambda r: r["date"], reverse=True):  # stable: keeps Yahoo's order within a day
+        row = {k: source_row.get(k) for k in FACTS}
         if needs_reason(row):
-            entry = kept.get(yahoo_row["id"]) or {}
+            entry = kept.get(source_row["id"]) or {}
             row["searched"] = bool(entry.get("searched"))
             if row["searched"]:
                 row.update(why=entry.get("cause"), why_basis=entry.get("basis"),
                            why_source=entry.get("source"), why_url=entry.get("url"))
         rows.append(row)
-    return {"since": table["since"], "rows": rows,
+    return {"since": since, "rows": rows,
             "changes": sum(1 for r in rows if needs_reason(r)),
             "pending": sum(1 for r in rows if r.get("searched") is False)}
 
@@ -726,6 +734,8 @@ def build(cfg: dict, customize: Optional[Customize] = None, page_dir: Optional[P
         "exchange": EXCHANGES.get(info.get("exchange"), info.get("exchange")),
         "currency": currency,
         "classification": f"Yahoo: {sector}" if sector else None,
+        # The domain is the asset's own setting; Yahoo has only sector and industry, its fallback.
+        "domain": cfg.get("domain") or info.get("industry") or info.get("category") or None,
         "note": cfg.get("note"),
         "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": f"Yahoo Finance via yfinance {yf.__version__} (unofficial; cross-check with SEC filings)",

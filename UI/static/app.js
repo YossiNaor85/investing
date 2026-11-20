@@ -1,5 +1,8 @@
-/* Investing UI: the "Your assets" picker, and for each asset a first page of
-   boxes that open its sections. Addresses:
+/* Investing UI: a first page (My thoughts, My watchlist), and for each asset a first
+   page of boxes that open its sections. Addresses:
+     #                the first page
+     #watchlist       My watchlist: the assets followed, by domain then A to Z
+     #thoughts        My thoughts: UI/my_thoughts.md, shown as written
      #IREN            first page (overview)
      #IREN/graphs/1Y  graphs, with the 1Y / 3M / 1D window
      #IREN/ratios     fundamental ratios
@@ -26,6 +29,8 @@
   };
   const EMPTY_VIEWS = ["news", "info", "analyst", "sentiment"];
   const PARENT_VIEW = { ratings: "ratios" };  // a page opened from another page, for the breadcrumb
+  const PAGES = { home: "Home", watchlist: "My watchlist", thoughts: "My thoughts" };  // pages besides the assets
+  const THOUGHTS_FILE = "my_thoughts.md";  // UI/my_thoughts.md, written by hand
   const BOXES = [
     { view: "graphs", title: "Graphs", text: "Trading points over 1 year, 3 months and 1 day, with volume and the econometric measures." },
     { view: "ratios", title: "Fundamental ratios", text: "Valuation, profitability, growth, balance sheet, ownership and analysts." },
@@ -52,7 +57,8 @@
     hoverIndex: null,
     server: false,
     refreshing: false,
-    addOpen: false,   // the Add asset form is showing in the menu
+    page: null,       // home, watchlist or thoughts while one of those pages shows
+    thoughts: null,   // the thoughts file as last read: {text, modified}
     adding: null,     // ticker being added, while the skill runs
     deleting: null,   // ticker being deleted
   };
@@ -157,13 +163,19 @@
   }
 
   function assets() {
-    const list = window.INVESTING_ASSETS;
-    return Array.isArray(list) && list.length ? list : [{ ticker: "IREN", name: "IREN", has_data: false }];
+    return Array.isArray(window.INVESTING_ASSETS) ? window.INVESTING_ASSETS : [];
+  }
+
+  /** The watchlist by domain, A to Z, then by ticker within each domain; assets without a domain last. */
+  function sortedAssets() {
+    return assets().slice().sort((a, b) => (!a.domain - !b.domain)
+      || (a.domain || "").localeCompare(b.domain || "") || a.ticker.localeCompare(b.ticker));
   }
 
   async function loadAssets() {
     try { await loadScript("data/assets.js"); } catch (e) { /* no data written yet */ }
-    renderMenu();
+    renderWatchlist();
+    if (state.page === "home") renderHome();
   }
 
   async function loadAsset(ticker) {
@@ -176,39 +188,205 @@
     return window.INVESTING_DATA[ticker] || null;
   }
 
-  // ------------------------------------------------------------ assets menu
+  // ------------------------------------------------------- the first page
 
-  function renderMenu() {
-    const menu = $("assets-menu");
-    menu.textContent = "";
-    menu.append(h("div", { class: "menu-head", text: "Assets we follow" }));
-    for (const a of assets()) {
-      const item = h("button", { class: "menu-item", type: "button", role: "menuitem", "data-ticker": a.ticker },
-        h("span", { class: "menu-ticker", text: a.ticker }),
-        h("span", { class: "menu-name", text: a.name && a.name !== a.ticker ? a.name : "" }),
-        h("span", { class: "menu-price", text: isNum(a.price) ? money(a.price, a.currency || "USD") : "" }),
-        isNum(a.change_pct) ? deltaNode(a.change_pct) : h("span", { class: "muted small", text: a.has_data ? "" : "no data yet" }));
-      item.addEventListener("click", () => { closeMenu(); go(a.ticker, "overview"); });
-      const followed = (window.INVESTING_ASSETS || []).some((x) => x.ticker === a.ticker);
-      const del = h("button", { class: "menu-delete", type: "button", role: "menuitem", "data-delete": a.ticker,
-        "aria-label": "Delete " + a.ticker,
-        title: state.server ? "Delete " + a.ticker + " from Your assets" : "Deleting needs the UI server",
-        disabled: !state.server || !followed || state.deleting ? true : null,
-        text: state.deleting === a.ticker ? "…" : "✕" });
-      del.addEventListener("click", (e) => { e.stopPropagation(); deleteAsset(a.ticker); });
-      menu.append(h("div", { class: "menu-row", role: "none" }, item, del));
+  function goPage(page) {
+    location.hash = page === "home" ? "" : "#" + page;
+  }
+
+  function hidePages() {
+    state.page = null;
+    for (const p of Object.keys(PAGES)) $(p + "-page").hidden = true;
+  }
+
+  /** Show the first page, My watchlist or My thoughts. */
+  function showPage(page) {
+    state.page = page;
+    state.ticker = null;
+    state.data = null;
+    state.shownView = null;
+    for (const p of Object.keys(PAGES)) $(p + "-page").hidden = p !== page;
+    $("asset-view").hidden = true;
+    $("missing-state").hidden = true;
+    updateRefreshButton();
+    document.title = page === "home" ? "Investing" : PAGES[page] + " · Investing";
+    if (page === "home") renderHome();
+    else if (page === "watchlist") renderWatchlist();
+    else if (page === "thoughts") loadThoughts();
+    window.scrollTo(0, 0);
+  }
+
+  function renderHome() {
+    const host = $("home-boxes");
+    host.textContent = "";
+    const list = sortedAssets();
+    const edited = h("p", { class: "box-stat", text: thoughtsStamp() });
+    host.append(
+      h("a", { class: "box", href: "#thoughts" },
+        h("div", { class: "box-head" }, h("h2", { class: "box-title", text: "My thoughts" })),
+        h("p", { class: "box-text", text: "Your ideas and notes on the markets." }),
+        edited),
+      h("a", { class: "box", href: "#watchlist" },
+        h("div", { class: "box-head" }, h("h2", { class: "box-title", text: "My watchlist" })),
+        h("p", { class: "box-text", text: "The assets you follow, each with its graphs, ratios and analyst changes." }),
+        h("p", { class: "box-stat", text: list.length
+          ? list.length + (list.length === 1 ? " asset: " : " assets: ") + list.map((a) => a.ticker).join(", ")
+          : "No assets yet" })));
+    if (location.protocol !== "file:") {
+      fetchThoughts().then((t) => { state.thoughts = t; edited.textContent = thoughtsStamp(); }).catch(() => {});
     }
-    const add = h("button", { class: "menu-item menu-add", type: "button", role: "menuitem",
-      "aria-expanded": String(state.addOpen), disabled: state.adding ? true : null },
-      h("span", { class: "menu-ticker", "aria-hidden": "true", text: "+" }),
-      h("span", { class: "menu-name", text: state.adding ? "Adding " + state.adding + "…" : "Add asset" }));
-    add.addEventListener("click", () => {
-      state.addOpen = !state.addOpen;
-      renderMenu();
-      if (state.addOpen) $("add-ticker").focus();
-    });
-    menu.append(add);
-    if (state.addOpen) menu.append(addForm());
+  }
+
+  // ------------------------------------------------------------ my watchlist
+
+  /** My watchlist, a table without lines: ticker, asset, domain, and a boxed ✕ that removes it. */
+  function renderWatchlist() {
+    const host = $("watchlist-rows");
+    host.textContent = "";
+    const list = sortedAssets();
+    $("watchlist").hidden = !list.length;
+    $("watchlist-empty").hidden = list.length > 0;
+    for (const a of list) {
+      const href = hashFor(a.ticker, "overview");
+      const remove = h("button", { class: "watch-remove", type: "button",
+        "aria-label": "Remove " + a.ticker + " from your watchlist",
+        title: state.server ? "Remove " + a.ticker + " from your watchlist" : "Removing needs the UI server",
+        disabled: !state.server || state.deleting ? true : null,
+        text: state.deleting === a.ticker ? "\u2026" : "\u2715" });
+      remove.addEventListener("click", () => deleteAsset(a.ticker));
+      host.append(h("tr", {},
+        h("td", {}, h("a", { class: "watch-ticker", href, text: a.ticker })),
+        h("td", {}, a.name && a.name !== a.ticker
+          ? h("a", { class: "watch-name", href, tabindex: "-1", text: a.name }) : null),  // the ticker is the keyboard stop
+        h("td", { class: "watch-domain", text: a.domain || "" }),
+        h("td", { class: "watch-remove-col" }, remove)));
+    }
+  }
+
+  // ------------------------------------------------------------- my thoughts
+
+  const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+  /** A link in the thoughts file: web, mail and in-page links only. */
+  function mdLink(url, label) {
+    const ok = /^(https?:\/\/|mailto:|#)/i.test(url) || !/^[a-z][a-z0-9+.-]*:/i.test(url);
+    if (!ok) return label;
+    const external = /^https?:\/\//i.test(url);
+    return '<a href="' + url + '"' + (external ? ' target="_blank" rel="noopener noreferrer"' : "") + ">" + label + "</a>";
+  }
+
+  /** Inline markdown on escaped text: code, links, bold, italic and line breaks. */
+  function mdInline(text) {
+    const kept = [];
+    const keep = (html) => "\u0000" + (kept.push(html) - 1) + "\u0000";
+    let t = escHtml(text);
+    t = t.replace(/`([^`]+)`/g, (m, c) => keep("<code>" + c + "</code>"));
+    t = t.replace(/!?\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => keep(mdLink(url, label)));
+    t = t.replace(/\bhttps?:\/\/[^\s<]*[^\s<.,;:!?)]/g, (url) => keep(mdLink(url, url)));
+    t = t.replace(/\*\*(?=\S)([^*]*?\S)\*\*|__(?=\S)([^_]*?\S)__/g, (m, a, b) => "<strong>" + (a || b) + "</strong>");
+    t = t.replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?![\w*])/g, "$1<em>$2</em>");
+    t = t.replace(/(^|[^\w])_(?=\S)([^_\n]*?\S)_(?!\w)/g, "$1<em>$2</em>");
+    t = t.replace(/\n/g, "<br>");
+    return t.replace(/\u0000(\d+)\u0000/g, (m, i) => kept[Number(i)]);
+  }
+
+  /** Markdown to HTML for the thoughts page: headings, paragraphs, lists (nested by indent),
+   *  quotes, code blocks and rules. The text is escaped first, so the file shows as written
+   *  and can't add page code. <!-- comments --> don't show. */
+  function markdownToHtml(md) {
+    const lines = String(md || "").replace(/\r\n?/g, "\n").replace(/<!--[\s\S]*?-->/g, "").split("\n");
+    const out = [], lists = [];
+    let para = [], quote = [], code = null;
+    const flushPara = () => { if (para.length) out.push("<p>" + mdInline(para.join("\n")) + "</p>"); para = []; };
+    const flushQuote = () => { if (quote.length) out.push("<blockquote>" + markdownToHtml(quote.join("\n")) + "</blockquote>"); quote = []; };
+    const closeLists = () => { while (lists.length) out.push("</li></" + lists.pop().tag + ">"); };
+    const flushAll = () => { flushPara(); flushQuote(); closeLists(); };
+    for (const line of lines) {
+      if (code !== null) {
+        if (/^\s*```/.test(line)) { out.push("<pre><code>" + escHtml(code.join("\n")) + "</code></pre>"); code = null; }
+        else code.push(line);
+        continue;
+      }
+      if (/^\s*```/.test(line)) { flushAll(); code = []; continue; }
+      const quoted = /^\s{0,3}>\s?(.*)$/.exec(line);
+      if (quoted) { flushPara(); closeLists(); quote.push(quoted[1]); continue; }
+      flushQuote();
+      if (!line.trim()) { flushPara(); continue; }
+      const heading = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+      if (heading) {
+        flushAll();
+        const n = heading[1].length;
+        out.push("<h" + n + ">" + mdInline(heading[2]) + "</h" + n + ">");
+        continue;
+      }
+      if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { flushAll(); out.push("<hr>"); continue; }
+      const item = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+      if (item) {
+        flushPara();
+        const indent = item[1].replace(/\t/g, "    ").length;
+        const tag = /\d/.test(item[2]) ? "ol" : "ul";
+        while (lists.length && indent < lists[lists.length - 1].indent) out.push("</li></" + lists.pop().tag + ">");
+        const top = lists[lists.length - 1];
+        if (!top || indent > top.indent) { out.push("<" + tag + "><li>"); lists.push({ indent, tag }); }
+        else if (top.tag !== tag) { out.push("</li></" + lists.pop().tag + "><" + tag + "><li>"); lists.push({ indent, tag }); }
+        else out.push("</li><li>");
+        out.push(mdInline(item[3]));
+        continue;
+      }
+      if (lists.length && /^\s+\S/.test(line)) { out.push(" " + mdInline(line.trim())); continue; }  // more of the item above
+      closeLists();
+      para.push(line.trim());
+    }
+    if (code !== null) out.push("<pre><code>" + escHtml(code.join("\n")) + "</code></pre>");
+    flushAll();
+    return out.join("");
+  }
+
+  /** The thoughts file as it is on disk now, with when it was last saved. */
+  async function fetchThoughts() {
+    const res = await fetch(THOUGHTS_FILE, { cache: "no-store" });
+    if (res.status === 404) return { text: "", modified: null };
+    if (!res.ok) throw new Error("the server answered " + res.status);
+    const modified = res.headers.get("Last-Modified");
+    return { text: await res.text(), modified: modified ? new Date(modified) : null };
+  }
+
+  function thoughtsStamp() {
+    const t = state.thoughts;
+    if (!t) return "";
+    if (!t.text.trim()) return "Nothing written yet";
+    return t.modified ? "Last edited " + t.modified.toLocaleString([], { month: "short", day: "numeric",
+      year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  }
+
+  async function loadThoughts() {
+    const box = $("thoughts");
+    try {
+      state.thoughts = await fetchThoughts();
+      box.innerHTML = markdownToHtml(state.thoughts.text) || '<p class="muted">Nothing written yet.</p>';
+      $("thoughts-meta").textContent = state.thoughts.text.trim() ? thoughtsStamp() : "";
+    } catch (e) {
+      box.textContent = "";
+      box.append(h("p", { class: "muted", text: location.protocol === "file:"
+        ? "Your thoughts show when this page is opened through the UI server."
+        : "Couldn't read your thoughts: " + e.message }));
+      $("thoughts-meta").textContent = "";
+    }
+  }
+
+  // --------------------------------------------------------------- add asset
+
+  function updateAddButton() {
+    const b = $("add-button");
+    b.textContent = state.adding ? "Adding " + state.adding + "\u2026" : "+ Add asset";
+    b.disabled = Boolean(state.adding);
+  }
+
+  function renderAddPanel() {
+    const panel = $("add-panel");
+    panel.textContent = "";
+    panel.append(h("div", { class: "menu-head", text: "Add an asset to your watchlist" }), addForm());
   }
 
   function addForm() {
@@ -219,43 +397,34 @@
     const form = h("form", { class: "add-form" },
       h("div", { class: "add-row" }, input, submit),
       h("p", { class: "add-help", text: state.server
-        ? "Builds the page and its pipeline on this computer with a Python script, then opens it. Takes about half a minute."
-        : "Adding needs the UI server: start it with UI\\link\\start-investing-ui.cmd." }));
+        ? "Builds the asset's page and opens it, in about half a minute. Its domain and the reasons behind its analyst changes are added in the background."
+        : "Adding needs the UI server to be running." }));
     form.addEventListener("submit", (e) => { e.preventDefault(); addAsset(input.value); });
     return form;
   }
 
-  function menuItems() {
-    return Array.from($("assets-menu").querySelectorAll(".menu-item, .menu-delete")).filter((el) => !el.disabled);
+  function openAddPanel() {
+    renderAddPanel();
+    $("add-panel").hidden = false;
+    $("add-button").setAttribute("aria-expanded", "true");
+    const input = $("add-ticker");
+    if (input && !input.disabled) input.focus();
   }
 
-  function openMenu() {
-    $("assets-menu").hidden = false;
-    $("assets-button").setAttribute("aria-expanded", "true");
-    const items = menuItems();
-    const current = items.find((el) => el.dataset.ticker === state.ticker);
-    (current || items[0])?.focus();
+  function closeAddPanel(returnFocus) {
+    if ($("add-panel").hidden) return;
+    $("add-panel").hidden = true;
+    $("add-button").setAttribute("aria-expanded", "false");
+    if (returnFocus) $("add-button").focus();
   }
 
-  function closeMenu(returnFocus) {
-    if ($("assets-menu").hidden) return;
-    $("assets-menu").hidden = true;
-    $("assets-button").setAttribute("aria-expanded", "false");
-    if (returnFocus) $("assets-button").focus();
-  }
-
-  function wireMenu() {
-    $("assets-button").addEventListener("click", () => ($("assets-menu").hidden ? openMenu() : closeMenu()));
-    $("assets-menu").addEventListener("keydown", (e) => {
-      if (e.target.tagName === "INPUT" && e.key !== "Escape") return;  // typing a ticker
-      const items = menuItems();
-      const i = items.indexOf(document.activeElement);
-      if (e.key === "ArrowDown") { items[(i + 1) % items.length].focus(); e.preventDefault(); }
-      else if (e.key === "ArrowUp") { items[(i - 1 + items.length) % items.length].focus(); e.preventDefault(); }
-      else if (e.key === "Escape") { closeMenu(true); e.preventDefault(); }
+  function wireAddPanel() {
+    $("add-button").addEventListener("click", () => ($("add-panel").hidden ? openAddPanel() : closeAddPanel()));
+    $("add-panel").addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { closeAddPanel(true); e.preventDefault(); }
     });
     document.addEventListener("pointerdown", (e) => {
-      if (!e.target.closest(".menu-wrap")) closeMenu();
+      if (!e.target.closest(".menu-wrap")) closeAddPanel();
     });
   }
 
@@ -263,6 +432,8 @@
 
   function parseHash() {
     const parts = decodeURIComponent(location.hash.replace(/^#/, "")).split("/").filter(Boolean);
+    if (!parts.length || parts[0] === "home") return { page: "home" };
+    if (PAGES[parts[0]]) return { page: parts[0] };
     const ticker = (parts[0] || "").toUpperCase();
     let view = "overview", win = null;
     if (WINDOWS[parts[1]]) {  // older links, like #IREN/1Y, open the graphs
@@ -290,7 +461,9 @@
   /** Show what the address names: load the asset's data when needed, then its view. */
   async function route() {
     const r = parseHash();
-    if (!r.ticker) return;
+    closeAddPanel();
+    if (r.page || !r.ticker) { showPage(r.page || "home"); return; }
+    hidePages();
     if (r.window) state.window = r.window;
     state.view = r.view;
     if (r.ticker !== state.ticker || !state.data) {
@@ -300,12 +473,15 @@
       render(data);
       if (state.server) watchReasons(r.ticker, true);  // a search still running from before a reload
     } else {
+      $("asset-view").hidden = false;
+      updateRefreshButton();
       showView();
     }
   }
 
   function showMissing(ticker) {
-    $("empty-state").hidden = true;
+    hidePages();
+    updateRefreshButton();
     $("asset-view").hidden = true;
     $("missing-state").hidden = false;
     $("missing-title").textContent = "No data for " + ticker + " yet";
@@ -317,9 +493,10 @@
     state.data = data;
     state.currency = data.currency || "USD";
     state.hoverIndex = null;
-    $("empty-state").hidden = true;
+    hidePages();
     $("missing-state").hidden = true;
     $("asset-view").hidden = false;
+    updateRefreshButton();
     renderHead(data);
     renderKpis(data.kpis);
     renderBoxes(data);
@@ -429,10 +606,12 @@
     for (const name of ["overview", "graphs", "ratios", "ratings"]) $("view-" + name).hidden = v !== name;
     $("view-empty").hidden = !EMPTY_VIEWS.includes(v);
     $("placeholder-title").textContent = VIEWS[v];
-    $("crumbs").hidden = v === "overview";
+    // My watchlist › IREN › Fundamental ratios; on the asset's first page, My watchlist › IREN
+    const first = v === "overview";
+    $("crumb-asset").hidden = $("crumb-asset-sep").hidden = first;
     $("crumb-asset").textContent = state.ticker;
     $("crumb-asset").setAttribute("href", hashFor(state.ticker, "overview"));
-    $("crumb-current").textContent = VIEWS[v];
+    $("crumb-current").textContent = first ? state.ticker : VIEWS[v];
     const parent = PARENT_VIEW[v];
     $("crumb-parent").hidden = $("crumb-parent-sep").hidden = !parent;
     if (parent) {
@@ -935,6 +1114,7 @@
 
   function updateRefreshButton() {
     const b = $("refresh-button");
+    b.hidden = !state.ticker;  // refreshes the asset on screen; the other pages have none
     b.disabled = state.refreshing;
     b.textContent = state.refreshing ? "Refreshing…" : "Refresh";
     b.title = state.server
@@ -948,13 +1128,14 @@
       try { state.server = (await fetch("api/status", { cache: "no-store" })).ok; } catch (e) { /* page served elsewhere */ }
     }
     updateRefreshButton();
-    renderMenu();
+    renderAddPanel();
+    renderWatchlist();
     updateDeleteButton();
   }
 
   async function refresh() {
-    if (state.refreshing) return;
-    const ticker = state.ticker || assets()[0].ticker;
+    if (state.refreshing || !state.ticker) return;
+    const ticker = state.ticker;
     if (!state.server) {
       setStatus("Refresh needs the UI server. Start it with UI\\link\\start-investing-ui.cmd; it opens this page at http://127.0.0.1:8765/.", "warn");
       return;
@@ -995,30 +1176,48 @@
     state.watching = ticker;
     const q = "?ticker=" + encodeURIComponent(ticker) + "&job=causes";
     try {
-      let status, announced = false, first = true;
+      let status, announced = false, naming = false, collecting = false, domainShown = false, first = true;
       for (;;) {
         status = await (await fetch("api/status" + q, { cache: "no-store" })).json();
         if (first && onlyIfRunning && status.state !== "running") return;
         first = false;
         if (status.state !== "running") break;
+        if (status.phase === "domain" && !naming) {
+          naming = true;
+          setStatus("Reading what " + ticker + " does, to name its domain\u2026");
+        }
+        if (status.domain && !domainShown) {
+          domainShown = true;
+          loadAssets();  // My watchlist shows the new domain right away
+        }
+        if (status.phase === "collecting" && !collecting) {
+          collecting = true;
+          const n = status.to_explain;
+          setStatus((status.domain ? ticker + "'s domain: " + status.domain + ". " : "") +
+            "Collecting the news behind " + n + " analyst " + (n === 1 ? "change" : "changes") + " for " + ticker + "\u2026");
+        }
         if (status.phase === "searching" && !announced) {
           announced = true;
           state.searching = ticker;
           if (state.ticker === ticker && state.data) renderAnalystTable(state.data.analyst_actions);
           const n = status.to_explain;
           setStatus("Looking up the reasons behind " + n + " new analyst " + (n === 1 ? "change" : "changes") +
-            " for " + ticker + "\u2026 This takes a few minutes.");
+            " for " + ticker + "\u2026 " + (n > 20 ? "With this many, it can take 20 minutes or more." : "This takes a few minutes."));
         }
         await sleep(announced ? 5000 : 1500);
       }
       state.searching = null;
+      if (status.domain) await loadAssets();  // My watchlist shows the new domain
+      const named = status.domain ? ticker + "'s domain: " + status.domain + ". " : "";
       if (status.state === "error") {
         setStatus("Couldn't look up the reasons behind new analyst changes for " + ticker + ": " + (status.message || "unknown error"), "warn");
       } else if (status.explained) {
         const data = await loadAsset(ticker);
         if (data && state.ticker === ticker) render(data);
-        setStatus("Added the reasons behind " + status.explained + " new analyst " +
+        setStatus(named + "Added the reasons behind " + status.explained + " new analyst " +
           (status.explained === 1 ? "change" : "changes") + " for " + ticker + ".", "ok");
+      } else if (named) {
+        setStatus(named.trim(), "ok");
       } else if (announced && state.ticker === ticker && state.data) {
         renderAnalystTable(state.data.analyst_actions);
       }
@@ -1035,7 +1234,7 @@
     $("notice").hidden = false;
   }
 
-  /** Add an asset: the server runs UI/pipeline/new_page.py (no AI), and we wait for its report. */
+  /** Add an asset: the server builds its page with UI/pipeline/new_page.py, and we wait for its report. */
   async function addAsset(raw) {
     const ticker = String(raw || "").trim().toUpperCase();
     if (!TICKER_RE.test(ticker)) {
@@ -1043,8 +1242,8 @@
       return;
     }
     if ((window.INVESTING_ASSETS || []).some((a) => a.ticker === ticker)) {
-      closeMenu();
-      setStatus(ticker + " is already in Your assets.");
+      closeAddPanel();
+      setStatus(ticker + " is already in your watchlist.");
       go(ticker, "overview");
       return;
     }
@@ -1053,9 +1252,8 @@
       return;
     }
     state.adding = ticker;
-    state.addOpen = false;
-    renderMenu();
-    closeMenu();
+    updateAddButton();
+    closeAddPanel();
     const started = Date.now();
     setStatus("Adding " + ticker + ": building the page…");
     try {
@@ -1064,7 +1262,7 @@
       const body = await res.json().catch(() => ({}));
       if (res.status === 409 && body.registered) {
         await loadAssets();
-        setStatus(ticker + " is already in Your assets.");
+        setStatus(ticker + " is already in your watchlist.");
         go(ticker, "overview");
         return;
       }
@@ -1089,7 +1287,7 @@
       setStatus("Adding " + ticker + " failed: " + e.message, "error");
     } finally {
       state.adding = null;
-      renderMenu();
+      updateAddButton();
     }
   }
 
@@ -1099,32 +1297,20 @@
     b.textContent = state.deleting === state.ticker ? "Deleting…" : "Delete " + state.ticker;
     b.disabled = !state.server || Boolean(state.deleting);
     b.title = state.server
-      ? "Delete " + state.ticker + " from Your assets"
+      ? "Remove " + state.ticker + " from your watchlist"
       : "Deleting needs the UI server: start it with UI\\link\\start-investing-ui.cmd";
   }
 
-  function showEmpty() {
-    state.ticker = null;
-    state.data = null;
-    state.view = "overview";
-    state.shownView = null;
-    $("asset-view").hidden = true;
-    $("missing-state").hidden = true;
-    $("empty-state").hidden = false;
-    document.title = "Investing";
-    history.replaceState(null, "", location.pathname + location.search);
-  }
-
-  /** Delete an asset. The server archives its folder in UI/asset/_deleted/, so it can be restored. */
+  /** Remove an asset from the watchlist. The server archives its folder in UI/asset/_deleted/, so it can be restored. */
   async function deleteAsset(ticker) {
     if (!state.server) {
-      setStatus("Deleting needs the UI server: start it with UI\\link\\start-investing-ui.cmd.", "warn");
+      setStatus("Removing needs the UI server to be running.", "warn");
       return;
     }
-    const sure = window.confirm("Delete " + ticker + " from Your assets?");
+    const sure = window.confirm("Remove " + ticker + " from your watchlist?");
     if (!sure) return;
     state.deleting = ticker;
-    renderMenu();
+    renderWatchlist();
     updateDeleteButton();
     try {
       const res = await fetch("api/assets?ticker=" + encodeURIComponent(ticker),
@@ -1133,19 +1319,20 @@
       if (!res.ok || !body.ok) throw new Error(body.error || "the server answered " + res.status);
       if (window.INVESTING_DATA) delete window.INVESTING_DATA[ticker];
       await loadAssets();
-      if (state.ticker === ticker) showEmpty();
-      setStatus(ticker + " deleted.", "ok");
+      if (state.ticker === ticker) goPage("watchlist");
+      setStatus(ticker + " removed from your watchlist.", "ok");
     } catch (e) {
-      setStatus("Deleting " + ticker + " failed: " + e.message, "error");
+      setStatus("Removing " + ticker + " failed: " + e.message, "error");
     } finally {
       state.deleting = null;
-      renderMenu();
+      renderWatchlist();
       updateDeleteButton();
     }
   }
 
   /** Pick up files the updater wrote on its own (e.g. a scheduled run). */
   async function reread() {
+    if (state.page === "thoughts") { loadThoughts(); return; }  // picks up edits to the file
     if (state.refreshing || !state.ticker) return;
     await loadAssets();
     const data = await loadAsset(state.ticker);
@@ -1167,7 +1354,8 @@
   // ------------------------------------------------------------------ init
 
   function init() {
-    wireMenu();
+    wireAddPanel();
+    updateAddButton();
     $("refresh-button").addEventListener("click", refresh);
     $("notice-close").addEventListener("click", () => { $("notice").hidden = true; });
     $("delete-asset").addEventListener("click", () => { if (state.ticker) deleteAsset(state.ticker); });

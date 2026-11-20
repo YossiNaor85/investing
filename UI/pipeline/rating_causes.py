@@ -5,7 +5,7 @@ of the past year as of the last search for reasons, with the firm's reason for e
 change. A change is a new rating (upgrade, downgrade, new coverage) or a new price
 target; a plain reiteration needs no reason.
 
-    .venv\Scripts\python.exe UI\pipeline\rating_causes.py diff               # every asset in Your assets
+    .venv\Scripts\python.exe UI\pipeline\rating_causes.py diff               # every asset in My watchlist
     .venv\Scripts\python.exe UI\pipeline\rating_causes.py diff IREN OKTA     # some of them
     .venv\Scripts\python.exe UI\pipeline\rating_causes.py save IREN UI\data\_causes\IREN.found.json
 
@@ -51,7 +51,7 @@ from pipeline import asset_page as ap  # noqa: E402
 
 UI_DIR = PIPELINE_DIR.parent
 WORK_DIR = UI_DIR / "data" / "_causes"   # the skill's working files: what's pending, what it found
-FACTS = ("date", "firm", "action", "rating", "previous", "prior_target", "target", "rating_changed", "target_changed")
+FACTS = ap.FACTS     # a row's facts, as the kept table stores them
 ABOUT = ("The analyst updates of the past year, as of the last search for reasons, with the firm's reason "
          "for each change of rating or price target. Refresh compares Yahoo's table with this one and sends "
          "only new changes to the rating_change_cause_searcher skill.")
@@ -144,7 +144,7 @@ def asset_entry(ticker: str) -> Optional[dict]:
 
 
 def asset_folder(ticker: str) -> Path:
-    """The asset's folder: where Your assets says its pipeline is, or where new_page.py puts it."""
+    """The asset's folder: where My watchlist says its pipeline is, or where new_page.py puts it."""
     entry = asset_entry(ticker)
     if entry and entry.get("pipeline"):
         return (UI_DIR / entry["pipeline"]).parent
@@ -282,7 +282,7 @@ def cmd_diff(args) -> int:
         folder = asset_folder(ticker)
         out = WORK_DIR / f"{ticker}.pending.json"
         if not (folder / "config.json").is_file():
-            report.append({"ticker": ticker, "error": "not in Your assets"})
+            report.append({"ticker": ticker, "error": "not in your watchlist"})
             continue
         table = ap.rating_changes(ticker)
         if not table or not table["rows"]:
@@ -357,7 +357,7 @@ def cmd_save(args) -> int:
     ticker = args.ticker.upper()
     folder = asset_folder(ticker)
     if not (folder / "config.json").is_file():
-        return fail(f"{ticker} isn't in Your assets")
+        return fail(f"{ticker} isn't in your watchlist")
     files = [Path(f) for pattern in args.files for f in (sorted(glob.glob(pattern)) or [pattern])]
     entries = []
     for f in files:
@@ -448,7 +448,7 @@ def main() -> int:
     for name in ("diff", "pending"):  # "pending" is the older name
         p = sub.add_parser(name, help="compare Yahoo's table with the kept one; list new changes, with headlines"
                            if name == "diff" else argparse.SUPPRESS)
-        p.add_argument("tickers", nargs="*", help="default: every asset in Your assets")
+        p.add_argument("tickers", nargs="*", help="default: every asset in My watchlist")
         p.add_argument("--limit", type=int, metavar="N", help="list at most about N changes per asset, newest first")
         p.add_argument("--no-news", action="store_true", help="skip the Google News headlines")
         p.set_defaults(func=cmd_diff)

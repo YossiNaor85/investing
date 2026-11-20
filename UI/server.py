@@ -12,15 +12,18 @@ Every button runs a plain Python script here:
                                      to UI/asset/_deleted/, data files removed
     GET    /api/status?ticker=RIOT[&job=add|causes]   progress of a refresh, an add or a reason search
 
-After a refresh or an add, the server compares the asset's analyst table with the one
-kept in its folder (UI/pipeline/rating_causes.py diff, a plain script). Only when there
-are new changes of rating or price target does it start AI: Claude Code runs the
-rating_change_cause_searcher skill in the background on just those changes, allowed
-only web research and the skill's own script and working folder. AUTO_REASONS below
-turns this off.
+Two things use AI, in the background, and only for what's new:
+- After an add, Claude names the asset's domain once from the company's own description
+  (UI/pipeline/asset_domain.py), with no tools at all.
+- After a refresh or an add, the server compares the asset's analyst table with the one
+  kept in its folder (UI/pipeline/rating_causes.py diff, a plain script). Only when there
+  are new changes of rating or price target does Claude Code run the
+  rating_change_cause_searcher skill on just those changes, allowed only web research
+  and the skill's own script and working folder.
+AUTO_AI below turns both off.
 
 The server listens on 127.0.0.1 only, so no other computer can reach it.
-It serves only the page, its static files and data/.
+It serves only the page, its static files, data/ and my_thoughts.md.
 """
 from __future__ import annotations
 
@@ -43,14 +46,18 @@ UI_DIR = Path(__file__).resolve().parent
 REPO_DIR = UI_DIR.parent
 NEW_PAGE = UI_DIR / "pipeline" / "new_page.py"
 CAUSES = UI_DIR / "pipeline" / "rating_causes.py"
+DOMAIN = UI_DIR / "pipeline" / "asset_domain.py"
 WORK_DIR = UI_DIR / "data" / "_causes"
 TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,12}$")
 REFRESH_TIMEOUT_S = 300
 ADD_TIMEOUT_S = 300
-SERVED = ("/", "/index.html", "/static/", "/data/")
+SERVED = ("/", "/index.html", "/my_thoughts.md")  # exact paths; also everything under:
+SERVED_DIRS = ("/static/", "/data/")
 
-# The reason search behind new analyst changes (rating or price target).
-AUTO_REASONS = True             # False: refreshes never start AI; run the skill by hand instead
+# The background AI: a new asset's domain, and the reasons behind new analyst changes.
+AUTO_AI = True                  # False: the buttons never start Claude; run the skills by hand instead
+DOMAIN_TIMEOUT_S = 300
+DOMAIN_BUDGET_USD = 0.5
 DIFF_TIMEOUT_S = 900            # the diff also fetches free news headlines for each new change
 REASONS_TIMEOUT_S = 3600        # a first search for a newly added stock can take a while
 BUDGET_PER_CHANGE_USD = 0.5     # spending cap for one search: this much per change...
@@ -113,47 +120,100 @@ def diff(ticker: str, news: bool = True) -> dict:
         raise RuntimeError((err or out).strip()[-300:] or f"exit code {code}")
 
 
-def reasons_job(ticker: str) -> Callable[[], dict]:
-    """Compare the analyst table with the kept one (a plain script). When there are new
-    changes, have the rating_change_cause_searcher skill find their reasons (AI), then
-    report how many it explained."""
+def log_run(ticker: str, kind: str, code: int, result: dict, **extra) -> None:
+    """One line per background Claude run, with its cost, in UI/data/_causes/<TICKER>.log."""
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    with (WORK_DIR / f"{ticker}.log").open("a", encoding="utf-8") as log:
+        log.write(json.dumps(dict({"at": now(), "kind": kind, "exit": code, "cost_usd": result.get("total_cost_usd"),
+                                   "turns": result.get("num_turns")}, **extra, result=result.get("result")),
+                             ensure_ascii=False) + "\n")
+
+
+def claude_json(cmd: list, timeout: int) -> tuple:
+    """(exit code, result) of a non-interactive Claude run with --output-format json."""
+    code, out, err = run(cmd, timeout)
+    try:
+        return code, json.loads(out)
+    except ValueError:
+        return code, {"is_error": True, "result": (err or out).strip()[-500:]}
+
+
+def config_domain(ticker: str) -> Optional[str]:
+    script = pipeline_for(ticker)
+    try:
+        return json.loads((script.parent / "config.json").read_text(encoding="utf-8-sig")).get("domain") if script else None
+    except (OSError, ValueError):
+        return None
+
+
+def name_domain(ticker: str) -> Optional[str]:
+    """Have Claude name a new asset's domain from the company's own description, once, and
+    save it in the asset's config.json. No tools: the question carries the description."""
+    cli = claude_cli()
+    if not cli or config_domain(ticker):
+        return None
+    JOBS.note(f"causes:{ticker}", phase="domain")
+    code, prompt, _ = run([sys.executable, str(DOMAIN), "prompt", ticker], 120)
+    if code != 0 or not prompt.strip():
+        return None
+    code, result = claude_json([cli, "-p", prompt, "--permission-mode", "dontAsk", "--output-format", "json",
+                                "--max-budget-usd", f"{DOMAIN_BUDGET_USD:.2f}", "--no-session-persistence"],
+                               DOMAIN_TIMEOUT_S)
+    answer = (result.get("result") or "").strip()
+    saved = None
+    if code == 0 and not result.get("is_error") and answer:
+        set_code, out, _ = run([sys.executable, str(DOMAIN), "set", ticker, answer], DOMAIN_TIMEOUT_S)
+        try:
+            saved = json.loads(out).get("domain") if set_code == 0 else None
+        except ValueError:
+            saved = None
+    log_run(ticker, "domain", code, result, domain=saved)
+    return saved
+
+
+def reasons_job(ticker: str, new_asset: bool = False) -> Callable[[], dict]:
+    """For a new asset, first name its domain (AI, once). Then compare the analyst table
+    with the kept one (a plain script); when there are new changes, have the
+    rating_change_cause_searcher skill find their reasons (AI), and report how many."""
     def work() -> dict:
-        todo = diff(ticker).get("to_explain") or 0
+        key = f"causes:{ticker}"
+        domain = name_domain(ticker) if new_asset else None
+        if domain:
+            JOBS.note(key, domain=domain)  # the page shows it now, before the reasons
+        todo = diff(ticker, news=False).get("to_explain") or 0  # a quick count first
+        if todo:
+            JOBS.note(key, phase="collecting", to_explain=todo)
+            todo = diff(ticker).get("to_explain") or 0  # now with the news headlines for each change
         if not todo:
-            return {"state": "done", "to_explain": 0, "explained": 0, "message": "no new analyst changes"}
+            return {"state": "done", "to_explain": 0, "explained": 0, "domain": domain, "message": "no new analyst changes"}
         cli = claude_cli()
         if not cli:
-            return {"state": "error", "to_explain": todo, "message": "Claude Code isn't installed on this computer"}
+            return {"state": "error", "to_explain": todo, "domain": domain,
+                    "message": "Claude Code isn't installed on this computer"}
         JOBS.note(f"causes:{ticker}", phase="searching", to_explain=todo)
         budget = min(BUDGET_MAX_USD, max(BUDGET_MIN_USD, BUDGET_PER_CHANGE_USD * todo))
         prompt = (f"Use the rating_change_cause_searcher skill for {ticker}. It runs unattended in the background, "
                   "started by the investing UI after a refresh: ask no questions, and finish by saving the reasons.")
-        cmd = [cli, "-p", prompt, "--permission-mode", "dontAsk", "--allowedTools", *REASON_TOOLS,
-               "--output-format", "json", "--max-budget-usd", f"{budget:.2f}", "--no-session-persistence"]
-        code, out, err = run(cmd, REASONS_TIMEOUT_S)
-        try:
-            result = json.loads(out)
-        except ValueError:
-            result = {"is_error": True, "result": (err or out).strip()[-500:]}
-        WORK_DIR.mkdir(parents=True, exist_ok=True)
-        with (WORK_DIR / f"{ticker}.log").open("a", encoding="utf-8") as log:
-            log.write(json.dumps({"at": now(), "to_explain": todo, "exit": code, "cost_usd": result.get("total_cost_usd"),
-                                  "turns": result.get("num_turns"), "result": result.get("result")}, ensure_ascii=False) + "\n")
+        code, result = claude_json([cli, "-p", prompt, "--permission-mode", "dontAsk", "--allowedTools", *REASON_TOOLS,
+                                    "--output-format", "json", "--max-budget-usd", f"{budget:.2f}",
+                                    "--no-session-persistence"], REASONS_TIMEOUT_S)
+        log_run(ticker, "reasons", code, result, to_explain=todo)
         left = diff(ticker, news=False).get("to_explain") or 0
         explained = max(0, todo - left)
         if code != 0 or result.get("is_error"):
             message = f"stopped with {left} of {todo} changes still to explain"
-            return {"state": "error", "to_explain": todo, "explained": explained, "left": left, "message": message}
-        return {"state": "done", "to_explain": todo, "explained": explained, "left": left,
+            return {"state": "error", "to_explain": todo, "explained": explained, "left": left, "domain": domain,
+                    "message": message}
+        return {"state": "done", "to_explain": todo, "explained": explained, "left": left, "domain": domain,
                 "message": f"explained {explained} of {todo} new analyst changes"}
     return work
 
 
-def start_reasons(ticker: str) -> Optional[str]:
-    """Start the reason search for an asset, unless it's turned off: "started", "running" or None."""
-    if not AUTO_REASONS:
+def start_reasons(ticker: str, new_asset: bool = False) -> Optional[str]:
+    """Start the background AI for an asset, unless it's turned off: "started", "running" or None."""
+    if not AUTO_AI:
         return None
-    return "started" if JOBS.start(f"causes:{ticker}", reasons_job(ticker)) else "running"
+    return "started" if JOBS.start(f"causes:{ticker}", reasons_job(ticker, new_asset)) else "running"
 
 
 def refresh_job(script: Path, ticker: str) -> Callable[[], dict]:
@@ -199,7 +259,7 @@ def add_job(ticker: str) -> Callable[[], dict]:
         added = pipeline_for(ticker) is not None
         if result.get("ok") and added:
             return {"state": "done", "added": True, "via": via, "message": describe(result, ticker),
-                    "causes": start_reasons(ticker)}
+                    "causes": start_reasons(ticker, new_asset=True)}
         message = result.get("error") or "\n".join(result.get("first_update") or []) or f"exit code {code}"
         return {"state": "error", "added": added, "via": via, "message": message}
     return work
@@ -302,7 +362,7 @@ class Handler(SimpleHTTPRequestHandler):
             job = asked if asked in ("add", "causes") else "refresh"
             return self._json(200, dict(self.jobs.get(f"{job}:{ticker}"), ticker=ticker, job=job,
                                         registered=pipeline_for(ticker) is not None))
-        if not (path in SERVED[:2] or path.startswith(SERVED[2:])):
+        if not (path in SERVED or path.startswith(SERVED_DIRS)):
             return self._json(404, {"error": "not found"})
         return super().do_GET()
 
@@ -320,11 +380,11 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/refresh":
             script = pipeline_for(ticker)
             if not script:
-                return self._json(404, {"error": f"{ticker} isn't in Your assets; add it first"})
+                return self._json(404, {"error": f"{ticker} isn't in your watchlist; add it first"})
             started = self.jobs.start(f"refresh:{ticker}", refresh_job(script, ticker))
             return self._json(202 if started else 409, dict(self.jobs.get(f"refresh:{ticker}"), ticker=ticker))
         if pipeline_for(ticker):
-            return self._json(409, {"error": f"{ticker} is already in Your assets", "registered": True, "ticker": ticker})
+            return self._json(409, {"error": f"{ticker} is already in your watchlist", "registered": True, "ticker": ticker})
         if self.jobs.busy("add:"):
             return self._json(409, {"error": "another asset is being added; try again when it finishes", "ticker": ticker})
         self.jobs.start(f"add:{ticker}", add_job(ticker))
@@ -339,7 +399,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not ticker:
             return self._json(400, {"error": "say which asset to delete: ?ticker=..."})
         if not pipeline_for(ticker):
-            return self._json(404, {"error": f"{ticker} isn't in Your assets"})
+            return self._json(404, {"error": f"{ticker} isn't in your watchlist"})
         if any(self.jobs.get(f"{job}:{ticker}").get("state") == "running" for job in ("refresh", "add", "causes")):
             return self._json(409, {"error": f"{ticker} is updating right now; try again when it finishes"})
         code, out, err = run([sys.executable, str(NEW_PAGE), "delete", ticker], 60)
@@ -362,7 +422,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open", action="store_true", help="open the UI in the browser")
     args = parser.parse_args()
-    url = f"http://127.0.0.1:{args.port}/#IREN"
+    url = f"http://127.0.0.1:{args.port}/"
     try:
         server = Server(("127.0.0.1", args.port), Handler)
     except OSError:
@@ -371,8 +431,8 @@ def main() -> int:
             webbrowser.open(url)
         return 0
     print(f"Investing UI: {url}")
-    print("Buttons run Python scripts. After a refresh, only new analyst changes go to Claude for their")
-    print("reasons, in the background. Keep this window open while you use the page;")
+    print("Buttons run Python scripts. In the background, Claude names a new asset's domain and finds the")
+    print("reasons behind new analyst changes, only for what's new. Keep this window open while you use the page;")
     print("close it, or press Ctrl+C, to stop.")
     if args.open:
         threading.Timer(0.6, webbrowser.open, args=(url,)).start()

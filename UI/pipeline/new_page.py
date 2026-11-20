@@ -238,6 +238,7 @@ def cmd_create(args) -> int:
         "compare": compare,
         "why": why,
         "note": args.note if args.note is not None else old.get("note"),
+        "domain": args.domain if args.domain is not None else old.get("domain"),
         "created": old.get("created", today),
         "updated": today,
     }
@@ -349,7 +350,7 @@ def cmd_remove(args) -> int:
     entries = ap.load_registry(ui)
     kept = [e for e in entries if e["ticker"] != ticker]
     if len(kept) == len(entries):
-        return fail(f"{ticker} isn't in Your assets")
+        return fail(f"{ticker} isn't in your watchlist")
     ap.save_registry(ui, kept)
     ap.write_assets(ui)
     page_dir, _, _ = page_paths(ui, ticker)
@@ -366,13 +367,13 @@ def run_update(ui: Path, script: Path) -> tuple:
 
 
 def cmd_delete(args) -> int:
-    """Take an asset off Your assets, archive its folder in UI/asset/_deleted/, drop its data files."""
+    """Take an asset off My watchlist, archive its folder in UI/asset/_deleted/, drop its data files."""
     ticker = args.ticker.upper()
     ui = ui_dir_from(args)
     entries = ap.load_registry(ui)
     entry = next((e for e in entries if e["ticker"] == ticker), None)
     if not entry:
-        return fail(f"{ticker} isn't in Your assets")
+        return fail(f"{ticker} isn't in your watchlist")
     page_dir = (ui / entry["pipeline"]).parent if entry.get("pipeline") else page_paths(ui, ticker)[0]
     archived = None
     if page_dir.is_dir():
@@ -400,7 +401,7 @@ def cmd_restore(args) -> int:
     ui = ui_dir_from(args)
     entries = ap.load_registry(ui)
     if any(e["ticker"] == ticker for e in entries):
-        return fail(f"{ticker} is already in Your assets")
+        return fail(f"{ticker} is already in your watchlist")
     archives = sorted((ui / "asset" / "_deleted").glob(f"{ap.slug(ticker)}_page-*"))
     if not archives:
         return fail(f"no deleted page for {ticker} in {ui / 'asset' / '_deleted'}")
@@ -437,6 +438,7 @@ def main() -> int:
     p.add_argument("--compare", action="append", metavar="SYMBOL=LABEL", help="a comparison series; repeat")
     p.add_argument("--why", action="append", metavar="SYMBOL=REASON", help="why a series matters; repeat")
     p.add_argument("--note", help="a line shown under the asset's name, e.g. why it's followed")
+    p.add_argument("--domain", help="the asset's domain on My watchlist, e.g. 'Data centers' (default: Yahoo's industry)")
     p.add_argument("--rebuild", action="store_true",
                    help="rewrite an existing config; without --compare it keeps the current series")
     p.add_argument("--new-script", action="store_true",
@@ -450,10 +452,10 @@ def main() -> int:
     p.add_argument("--no-screenshots", action="store_true")
     p.set_defaults(func=cmd_check)
 
-    p = sub.add_parser("list", help="the assets in Your assets, in order")
+    p = sub.add_parser("list", help="the assets in My watchlist, in order")
     p.set_defaults(func=cmd_list)
 
-    p = sub.add_parser("remove", help="take an asset out of Your assets (its folder is kept)")
+    p = sub.add_parser("remove", help="take an asset out of My watchlist (its folder is kept)")
     p.add_argument("ticker")
     p.set_defaults(func=cmd_remove)
 

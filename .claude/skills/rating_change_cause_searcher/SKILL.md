@@ -1,6 +1,6 @@
 ---
 name: rating_change_cause_searcher
-description: Finds why analysts changed their rating or price target on a stock in the investing UI, and keeps the asset's analyst table, with each change's reason, in its folder. The UI's Refresh compares Yahoo's table with the kept one and runs this skill in the background on just the new changes. Use it by hand when a rating changes page shows "Not looked into yet", after a stock's page is built (the asset-page skill calls it), or when the user asks why an analyst upgraded, downgraded, started coverage or moved a target on a followed stock. Takes tickers; with none, it covers every asset in Your assets.
+description: Finds why analysts changed their rating or price target on a stock in the investing UI, and keeps the asset's analyst table, with each change's reason, in its folder. The UI's Refresh compares Yahoo's table with the kept one and runs this skill in the background on just the new changes. Use it by hand when a rating changes page shows "Not looked into yet", after a stock's page is built (the asset-page skill calls it), or when the user asks why an analyst upgraded, downgraded, started coverage or moved a target on a followed stock. Takes tickers; with none, it covers every asset in My watchlist.
 argument-hint: "[TICKER ...]"
 allowed-tools: Bash(.venv/Scripts/python.exe UI/pipeline/rating_causes.py *), PowerShell(.venv/Scripts/python.exe UI/pipeline/rating_causes.py *), PowerShell(.\.venv\Scripts\python.exe UI\pipeline\rating_causes.py *), WebSearch, WebFetch, Edit(UI/data/_causes/**)
 ---
@@ -27,7 +27,7 @@ A past change's reason doesn't change, so each change is searched once. Only the
 
    `.venv/Scripts/python.exe UI/pipeline/rating_causes.py diff $ARGUMENTS`
 
-   With no tickers it covers every asset in Your assets. For each asset it prints `to_explain`, the number of new changes without a reason, and writes them to `UI/data/_causes/<TICKER>.pending.json`. The changes come in groups of changes days apart, because several firms moving in the same days usually react to one event. Each change has:
+   With no tickers it covers every asset in My watchlist. For each asset it prints `to_explain`, the number of new changes without a reason, and writes them to `UI/data/_causes/<TICKER>.pending.json`. The changes come in groups of changes days apart, because several firms moving in the same days usually react to one event. Each change has:
    - its `id`
    - its facts: date, firm, action, rating and previous rating, the target before and after, and whether the rating or the target changed
    - `headlines`: what Google News had about that firm and company within a few days. `null` means the news search was cut short; search the web for that change.
@@ -110,6 +110,6 @@ Rules:
 |---|---|
 | `UI/asset/<slug>_page/analyst_table.json` | the kept table with each change's reason. It moves with the asset's folder when the asset is deleted and comes back when it's restored. |
 | `UI/pipeline/rating_causes.py` | `diff` and `save`: this skill's fixed steps |
-| `UI/server.py` | runs `diff` after each Refresh or Add, and starts this skill when `to_explain` is above zero. `AUTO_REASONS = False` there turns that off. |
+| `UI/server.py` | runs `diff` after each Refresh or Add, and starts this skill when `to_explain` is above zero. `AUTO_AI = False` there turns that off. |
 | `UI/pipeline/asset_page.py` | the page's update. `analyst_actions()` reads the kept table. |
 | `UI/data/_causes/` | working files: the pending and found lists, and `<TICKER>.log`, a line per background run with its cost. `save` removes the lists once they're used. |

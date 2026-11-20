@@ -1,17 +1,25 @@
 Investing UI
 
-Live (the Refresh button works):
-    http://127.0.0.1:8765/#IREN
-    Double-click start-investing-ui.cmd. It starts the UI server and opens the page.
+Live (the Refresh and Add asset buttons work):
+    http://127.0.0.1:8765/
+    Double-click start-investing-ui.cmd. It starts the UI server and opens the first page.
     Keep its window open while you use the page; close it to stop the server.
     investing-ui.url opens the same address while the server is running.
 
-Offline (shows the last saved data; Refresh is unavailable):
-    file:///C:/Users/naory/Documents/git/investing/UI/index.html#IREN
+Offline (shows the last saved data; Refresh and Add asset are unavailable):
+    file:///C:/Users/naory/Documents/git/investing/UI/index.html
     investing-ui-offline.url opens it.
 
-Pages of each asset:
-    #IREN                 its first page, with a box for each section
+Pages:
+    #                     the first page: My thoughts and My watchlist (Home at the top returns here)
+    #thoughts             My thoughts: shows UI\my_thoughts.md. Edit that file in any text
+                          editor (markdown: # heading, - bullet, **bold**, [link](https://...));
+                          reload the page to see it.
+    #watchlist            My watchlist: Ticker, Asset, Domain and Remove (a ✕), sorted by
+                          domain, then A to Z. When you add an asset, Claude names its domain
+                          once from the company's own description. To change it, edit "domain"
+                          in UI\asset\<ticker>_page\config.json and press Refresh.
+    #IREN                 an asset's first page, with a box for each section
     #IREN/graphs/1Y       graphs (also /3M and /1D)
     #IREN/ratios          fundamental ratios
     #IREN/ratings         analyst rating changes, with the reasons
@@ -22,12 +30,13 @@ UI\asset\iren_page\update_iren_page.py). The Refresh button runs the current ass
 pipeline through UI\server.py.
 
 Add an asset:
-    In the page: Your assets > + Add asset, type the ticker, Add. The server runs
-    UI\pipeline\new_page.py (a Python script, no AI). Comparison series come from
-    fixed rules; change them in UI\asset\<ticker>_page\config.json.
+    + Add asset at the top, type the ticker, Add. The server runs UI\pipeline\new_page.py
+    (a Python script). Comparison series come from fixed rules; change them in
+    UI\asset\<ticker>_page\config.json. The asset joins My watchlist.
     Or in Claude Code, /asset-page TICKER lets Claude choose them.
 
-Delete an asset: Your assets > the ✕ next to it. Its folder moves to UI\asset\_deleted\.
+Remove an asset: My watchlist > the ✕ at the right of its line (or Delete on its page).
+    Its folder moves to UI\asset\_deleted\.
     Bring it back: .venv\Scripts\python.exe UI\pipeline\new_page.py restore TICKER
 The skill lives in .claude\skills\asset-page\ and uses UI\pipeline\new_page.py.
 
@@ -39,4 +48,5 @@ Analyst rating changes (#IREN/ratings, the button in the Analysts box on #IREN/r
     (the rating_change_cause_searcher skill) on just those, then adds their reasons.
     Adding an asset does the same for its whole past year. The page tells you while the
     search runs. By hand in Claude Code: /rating_change_cause_searcher IREN.
-    To stop refreshes from starting Claude, set AUTO_REASONS = False in UI\server.py.
+    To stop the buttons from starting Claude (domains and reasons), set AUTO_AI = False in
+    UI\server.py.

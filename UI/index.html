@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Investing</title>
-  <link rel="stylesheet" href="static/styles.css?v=8">
+  <link rel="stylesheet" href="static/styles.css?v=13">
   <script>
     // Apply a saved theme before the first paint (Auto follows the system setting).
     try {
@@ -15,19 +15,20 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-name">Investing</span>
-      <span class="brand-sub">Connect the dots</span>
+    <div class="topbar-nav">
+      <a class="brand" href="#">
+        <span class="brand-name">Investing</span>
+        <span class="brand-sub">Connect the dots</span>
+      </a>
+      <a id="home-button" class="btn" href="#">Home</a>
     </div>
     <div class="topbar-actions">
       <span id="refresh-status" class="status" role="status" aria-live="polite"></span>
-      <button id="refresh-button" class="btn" type="button">Refresh</button>
+      <button id="refresh-button" class="btn" type="button" hidden>Refresh</button>
       <div class="menu-wrap">
-        <button id="assets-button" class="btn btn-primary" type="button"
-                aria-haspopup="menu" aria-expanded="false" aria-controls="assets-menu">
-          Your assets <span class="caret" aria-hidden="true">▾</span>
-        </button>
-        <div id="assets-menu" class="menu" role="menu" aria-label="Assets we follow" hidden></div>
+        <button id="add-button" class="btn btn-primary" type="button"
+                aria-haspopup="dialog" aria-expanded="false" aria-controls="add-panel">+ Add asset</button>
+        <div id="add-panel" class="menu add-panel" role="dialog" aria-label="Add an asset" hidden></div>
       </div>
       <button id="theme-button" class="btn btn-ghost" type="button">Theme: Auto</button>
     </div>
@@ -42,9 +43,43 @@
       <div id="notice-text" class="notice-text"></div>
     </section>
 
-    <section id="empty-state" class="empty">
-      <h1>Choose an asset</h1>
-      <p>Open <strong>Your assets</strong> and pick one to see its graphs, fundamental ratios and more.</p>
+    <!-- The first page: My thoughts and My watchlist -->
+    <section id="home-page" class="page" hidden>
+      <h1 class="sr-only">Home</h1>
+      <div id="home-boxes" class="boxes boxes-home"></div>
+    </section>
+
+    <section id="watchlist-page" class="page" hidden>
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="#">Home</a>
+        <span class="crumb-sep" aria-hidden="true">›</span>
+        <span aria-current="page">My watchlist</span>
+      </nav>
+      <h1>My watchlist</h1>
+      <p class="muted page-sub">The assets you follow, by domain, then A to Z.</p>
+      <table id="watchlist" class="watchlist">
+        <thead>
+          <tr>
+            <th scope="col">Ticker</th>
+            <th scope="col">Asset</th>
+            <th scope="col">Domain</th>
+            <th scope="col" class="watch-remove-col">Remove</th>
+          </tr>
+        </thead>
+        <tbody id="watchlist-rows"></tbody>
+      </table>
+      <p id="watchlist-empty" class="muted" hidden>No assets yet. Add one with <strong>+ Add asset</strong> at the top.</p>
+    </section>
+
+    <!-- My thoughts: UI/my_thoughts.md, shown as written -->
+    <section id="thoughts-page" class="page" hidden>
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <a href="#">Home</a>
+        <span class="crumb-sep" aria-hidden="true">›</span>
+        <span aria-current="page">My thoughts</span>
+      </nav>
+      <article id="thoughts" class="card prose"></article>
+      <p id="thoughts-meta" class="muted small page-foot"></p>
     </section>
 
     <section id="missing-state" class="empty" hidden>
@@ -54,9 +89,11 @@
     </section>
 
     <section id="asset-view" hidden>
-      <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden>
-        <a id="crumb-asset" href="#"></a>
+      <nav id="crumbs" class="crumbs" aria-label="Breadcrumb">
+        <a href="#watchlist">My watchlist</a>
         <span class="crumb-sep" aria-hidden="true">›</span>
+        <a id="crumb-asset" href="#"></a>
+        <span id="crumb-asset-sep" class="crumb-sep" aria-hidden="true">›</span>
         <a id="crumb-parent" href="#" hidden></a>
         <span id="crumb-parent-sep" class="crumb-sep" aria-hidden="true" hidden>›</span>
         <span id="crumb-current" aria-current="page"></span>
@@ -147,6 +184,6 @@
     </section>
   </main>
 
-  <script src="static/app.js?v=8"></script>
+  <script src="static/app.js?v=12"></script>
 </body>
 </html>

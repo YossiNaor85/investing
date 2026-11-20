@@ -61,4 +61,4 @@ Test changes on a copy of the UI:
 1. Copy `index.html`, `static/` and `pipeline/` into a scratch folder.
 2. Run `new_page.py --ui-dir <copy> create <TICKER> ...`.
 
-The real "Your assets" stays untouched.
+Your real watchlist stays untouched.
