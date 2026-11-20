@@ -3,7 +3,8 @@
      #IREN            first page (overview)
      #IREN/graphs/1Y  graphs, with the 1Y / 3M / 1D window
      #IREN/ratios     fundamental ratios
-     #IREN/news, #IREN/info, #IREN/analyst   empty for now
+     #IREN/ratings    analyst rating changes of the past year, with reasons (from the Analysts box)
+     #IREN/news, #IREN/info, #IREN/analyst, #IREN/sentiment   empty for now
    Data comes from data/<TICKER>.js, written by each asset's pipeline in UI/asset/<ticker>_page/.
    When the page is served by UI/server.py, the Refresh button runs that pipeline. */
 (() => {
@@ -17,17 +18,21 @@
     overview: "Overview",
     graphs: "Graphs",
     ratios: "Fundamental ratios",
+    ratings: "Analyst rating changes",
     news: "News",
     info: "Info",
     analyst: "Connect the dots",
+    sentiment: "Sentiment compass",
   };
-  const EMPTY_VIEWS = ["news", "info", "analyst"];
+  const EMPTY_VIEWS = ["news", "info", "analyst", "sentiment"];
+  const PARENT_VIEW = { ratings: "ratios" };  // a page opened from another page, for the breadcrumb
   const BOXES = [
     { view: "graphs", title: "Graphs", text: "Trading points over 1 year, 3 months and 1 day, with volume and the econometric measures." },
     { view: "ratios", title: "Fundamental ratios", text: "Valuation, profitability, growth, balance sheet, ownership and analysts." },
     { view: "news", title: "News", text: "Company, domain and macro news.", soon: true },
     { view: "info", title: "Info", text: "The business, its domain, peers and plans.", soon: true },
     { view: "analyst", title: "Connect the dots", text: "The analyst's story: why it moves and what to watch.", soon: true },
+    { view: "sentiment", title: "Sentiment compass", text: "The market's mood around this asset.", soon: true },
   ];
   const HIGH_VOLUME = 1.5;          // same threshold as the updater
   const TICKER_RE = /^[A-Z0-9.\-]{1,12}$/;
@@ -214,7 +219,7 @@
     const form = h("form", { class: "add-form" },
       h("div", { class: "add-row" }, input, submit),
       h("p", { class: "add-help", text: state.server
-        ? "Runs the asset-page skill (Claude Code) on this computer. It builds the page and its pipeline, then opens it. Takes a minute or two."
+        ? "Builds the page and its pipeline on this computer with a Python script, then opens it. Takes about half a minute."
         : "Adding needs the UI server: start it with UI\\link\\start-investing-ui.cmd." }));
     form.addEventListener("submit", (e) => { e.preventDefault(); addAsset(input.value); });
     return form;
@@ -293,6 +298,7 @@
       const data = await loadAsset(r.ticker);
       if (!data) { showMissing(r.ticker); return; }
       render(data);
+      if (state.server) watchReasons(r.ticker, true);  // a search still running from before a reload
     } else {
       showView();
     }
@@ -317,22 +323,122 @@
     renderHead(data);
     renderKpis(data.kpis);
     renderBoxes(data);
-    renderGroups($("ratios"), data.ratios);
+    const hasRatings = !!(data.analyst_actions && (data.analyst_actions.rows || []).length);
+    renderGroups($("ratios"), data.ratios, (g) => g.id === "analysts" && hasRatings
+      ? h("a", { class: "btn btn-small group-link", href: hashFor(data.ticker, "ratings") }, "Rating changes, past year \u2192")
+      : null);
+    renderAnalystTable(data.analyst_actions);
     renderGroups($("econ"), data.econometrics);
     renderFooter(data);
     showView();
   }
 
+  /** Every analyst update of the past year, newest first. Each change of rating or price
+   *  target gets the firm's reason when it's known; a plain reiteration needs none. */
+  function renderAnalystTable(aa) {
+    const rows = (aa && aa.rows) || [];
+    $("analyst-card").hidden = !rows.length;
+    $("analyst-none").hidden = !!rows.length;
+    const host = $("analyst-table");
+    host.textContent = "";
+    if (!rows.length) return;
+    const changed = rows.filter(isChange).length;
+    let sub = rows.length + " analyst updates since " + formatDate(aa.since) + ", newest first; " + changed +
+      " of them changed the rating or the price target." +
+      " Why: the firm's reason for the change, as reported in the news." +
+      " \u201cInferred\u201d marks a reason read from the timing, such as results released that week.";
+    if (aa.pending) sub += " " + (aa.pending === 1 ? "1 change" : aa.pending + " changes") + " not looked into yet.";
+    $("analyst-sub").textContent = sub;
+    const tbody = h("tbody");
+    for (const r of rows) {
+      const dir = r.action === "upgrade" ? "up" : r.action === "downgrade" ? "down" : "";
+      tbody.append(h("tr", {},
+        h("td", { class: "nowrap", text: formatDate(r.date) }),
+        h("th", { scope: "row", text: r.firm }),
+        h("td", {},
+          h("span", { class: "rating", text: r.rating || DASH }),
+          r.action ? h("span", { class: "rating-action" },
+            dir ? h("span", { class: "delta " + dir, "aria-hidden": "true", text: dir === "up" ? "▲ " : "▼ " }) : null,
+            r.action) : null),
+        h("td", { text: r.previous || DASH }),
+        targetCell(r),
+        whyCell(r)));
+    }
+    host.append(h("table", { class: "data-table analyst-table" },
+      h("caption", { class: "sr-only", text: "Analyst rating changes over the past year, newest first" }),
+      h("thead", {}, h("tr", {}, ...["Date", "Firm", "Rating", "Previous rating", "Price target", "Why"].map((x) =>
+        h("th", { scope: "col", class: x === "Price target" ? "num" : null, text: x })))),
+      tbody));
+  }
+
+  /** A new rating (upgrade, downgrade, new coverage) or a new price target: these get a reason. */
+  function isChange(r) {
+    if (r.rating_changed !== undefined || r.target_changed !== undefined) return !!(r.rating_changed || r.target_changed);
+    const target = isNum(r.target) && isNum(r.prior_target) && r.target !== r.prior_target;
+    return (r.rating || "") !== (r.previous || "") || target;
+  }
+
+  /** The price target, prior → new, with ▲ for a raise and ▼ for a cut. */
+  function targetCell(r) {
+    const cell = h("td", { class: "num nowrap" });
+    if (isNum(r.target) && isNum(r.prior_target) && r.target !== r.prior_target) {
+      const up = r.target > r.prior_target;
+      cell.append(h("span", { class: "delta " + (up ? "up" : "down"), "aria-hidden": "true", text: up ? "\u25b2 " : "\u25bc " }),
+        h("span", { class: "sr-only", text: up ? "raised from " : "cut from " }));
+    }
+    cell.append(targetText(r));
+    return cell;
+  }
+
+  /** The reason, then a line saying where it comes from: the article, or "Inferred". Empty when nothing changed. */
+  function whyCell(r) {
+    const cell = h("td", { class: "why" });
+    if (!isChange(r)) return cell;
+    if (r.searched === false) {
+      cell.append(h("span", { class: "muted", text: state.searching === state.ticker ? "Looking into it\u2026" : "Not looked into yet" }));
+      return cell;
+    }
+    if (!r.why) {
+      cell.append(h("span", { class: "muted", text: "No reason found" }));
+      return cell;
+    }
+    const url = /^https?:\/\//.test(r.why_url || "") ? r.why_url : null;
+    const inferred = r.why_basis === "inferred";
+    const source = r.why_source || (url ? "Article" : null);
+    cell.append(h("span", { text: r.why }));
+    if (inferred || source) {
+      cell.append(h("span", { class: "why-source" },
+        inferred ? h("span", { class: "inferred", text: "Inferred" }) : null,
+        inferred && source ? " · " : null,
+        source && url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer", title: "Open the article", text: source })
+          : source));
+    }
+    return cell;
+  }
+
+  function targetText(r) {
+    if (isNum(r.target) && isNum(r.prior_target) && r.prior_target !== r.target) {
+      return format(r.prior_target, "money") + " → " + format(r.target, "money");
+    }
+    return isNum(r.target) ? format(r.target, "money") : DASH;
+  }
+
   /** Show the current view's section; the chart is drawn only once its section is visible. */
   function showView() {
     const v = state.view;
-    for (const name of ["overview", "graphs", "ratios"]) $("view-" + name).hidden = v !== name;
+    for (const name of ["overview", "graphs", "ratios", "ratings"]) $("view-" + name).hidden = v !== name;
     $("view-empty").hidden = !EMPTY_VIEWS.includes(v);
     $("placeholder-title").textContent = VIEWS[v];
     $("crumbs").hidden = v === "overview";
     $("crumb-asset").textContent = state.ticker;
     $("crumb-asset").setAttribute("href", hashFor(state.ticker, "overview"));
     $("crumb-current").textContent = VIEWS[v];
+    const parent = PARENT_VIEW[v];
+    $("crumb-parent").hidden = $("crumb-parent-sep").hidden = !parent;
+    if (parent) {
+      $("crumb-parent").textContent = VIEWS[parent];
+      $("crumb-parent").setAttribute("href", hashFor(state.ticker, parent));
+    }
     $("delete-asset").hidden = v !== "overview";
     document.title = state.ticker + (v === "overview" ? "" : " · " + VIEWS[v]) + " · Investing";
     if (v === "graphs") renderWindow();
@@ -432,7 +538,7 @@
     }
   }
 
-  function renderGroups(host, groups) {
+  function renderGroups(host, groups, extra) {
     host.textContent = "";
     for (const g of groups || []) {
       const rows = h("dl", { class: "rows" });
@@ -446,7 +552,8 @@
       host.append(h("section", { class: "group" },
         h("h3", { text: g.title }),
         g.note ? h("p", { class: "group-note", text: g.note }) : null,
-        rows));
+        rows,
+        extra ? extra(g) : null));
     }
   }
 
@@ -870,6 +977,7 @@
       const data = await loadAsset(ticker);
       if (data && state.ticker === ticker) render(data);
       setStatus("Updated at " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), "ok");
+      if (status.causes) watchReasons(ticker);
     } catch (e) {
       setStatus("Refresh failed: " + e.message, "error");
     } finally {
@@ -879,14 +987,55 @@
     }
   }
 
-  function showNotice(title, text, via) {
+  /** After a refresh or an add, the server compares the asset's analyst table with the
+   *  kept one and, when there are new changes, looks up their reasons in the background.
+   *  Follow that, and show the reasons when they arrive. Quiet when nothing is new. */
+  async function watchReasons(ticker, onlyIfRunning) {
+    if (state.watching === ticker) return;
+    state.watching = ticker;
+    const q = "?ticker=" + encodeURIComponent(ticker) + "&job=causes";
+    try {
+      let status, announced = false, first = true;
+      for (;;) {
+        status = await (await fetch("api/status" + q, { cache: "no-store" })).json();
+        if (first && onlyIfRunning && status.state !== "running") return;
+        first = false;
+        if (status.state !== "running") break;
+        if (status.phase === "searching" && !announced) {
+          announced = true;
+          state.searching = ticker;
+          if (state.ticker === ticker && state.data) renderAnalystTable(state.data.analyst_actions);
+          const n = status.to_explain;
+          setStatus("Looking up the reasons behind " + n + " new analyst " + (n === 1 ? "change" : "changes") +
+            " for " + ticker + "\u2026 This takes a few minutes.");
+        }
+        await sleep(announced ? 5000 : 1500);
+      }
+      state.searching = null;
+      if (status.state === "error") {
+        setStatus("Couldn't look up the reasons behind new analyst changes for " + ticker + ": " + (status.message || "unknown error"), "warn");
+      } else if (status.explained) {
+        const data = await loadAsset(ticker);
+        if (data && state.ticker === ticker) render(data);
+        setStatus("Added the reasons behind " + status.explained + " new analyst " +
+          (status.explained === 1 ? "change" : "changes") + " for " + ticker + ".", "ok");
+      } else if (announced && state.ticker === ticker && state.data) {
+        renderAnalystTable(state.data.analyst_actions);
+      }
+    } catch (e) {
+      state.searching = null;  // the server stopped; the next refresh tries again
+    } finally {
+      state.watching = null;
+    }
+  }
+
+  function showNotice(title, text) {
     $("notice-title").textContent = title;
-    $("notice-via").textContent = via ? "Done by " + via + "." : "";
     $("notice-text").textContent = text || "";
     $("notice").hidden = false;
   }
 
-  /** Add an asset: the server runs the asset-page skill, and we wait for its report. */
+  /** Add an asset: the server runs UI/pipeline/new_page.py (no AI), and we wait for its report. */
   async function addAsset(raw) {
     const ticker = String(raw || "").trim().toUpperCase();
     if (!TICKER_RE.test(ticker)) {
@@ -908,7 +1057,7 @@
     renderMenu();
     closeMenu();
     const started = Date.now();
-    setStatus("Adding " + ticker + ": the asset-page skill is running…");
+    setStatus("Adding " + ticker + ": building the page…");
     try {
       const q = "?ticker=" + encodeURIComponent(ticker);
       const res = await fetch("api/assets" + q, { method: "POST", headers: { "X-Requested-With": "investing-ui" } });
@@ -924,16 +1073,17 @@
       do {
         await sleep(2000);
         status = await (await fetch("api/status" + q + "&job=add", { cache: "no-store" })).json();
-        setStatus("Adding " + ticker + ": the asset-page skill is running (" + Math.round((Date.now() - started) / 1000) + " s)…");
+        setStatus("Adding " + ticker + ": building the page (" + Math.round((Date.now() - started) / 1000) + " s)…");
       } while (status.state === "running");
       await loadAssets();
       if (status.added) {
         go(ticker, "overview");
         setStatus(ticker + " added.", "ok");
-        showNotice(ticker + " added", status.message, status.via);
+        showNotice(ticker + " added", status.message);
+        if (status.causes) watchReasons(ticker);
       } else {
         setStatus("Couldn't add " + ticker + "; see the note below.", "error");
-        showNotice("The asset-page skill stopped before adding " + ticker, status.message, status.via);
+        showNotice("Couldn't add " + ticker, status.message);
       }
     } catch (e) {
       setStatus("Adding " + ticker + " failed: " + e.message, "error");

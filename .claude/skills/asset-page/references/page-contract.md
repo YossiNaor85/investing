@@ -19,12 +19,25 @@ The `.js` file holds the same object, assigned to `window.INVESTING_DATA["<TICKE
 | series | {"1Y", "3M", "1D"} | the price windows (below) |
 | ratios, econometrics | list of groups | the two panels |
 | warnings | list of str | shown above the footer |
+| analyst_actions? | {since, rows, changes, pending} | the analyst updates of the past year, for the rating changes page (stocks only) |
+
+**Analyst update** (one row, newest first): `{date, firm, action, rating, previous, prior_target, target, rating_changed, target_changed, searched?, why?, why_basis?, why_source?, why_url?}`
+- `action` is upgrade, downgrade, new coverage, maintained or reiterated.
+- `rating_changed` is true for an upgrade, a downgrade or new coverage. `target_changed` is true when the price target moved.
+- A row with either is a change: only changes get `searched` and a reason, and `changes` counts them. A plain reiteration gets neither.
+- `searched` is false until the `rating_change_cause_searcher` skill has looked into the change. `pending` counts those.
+- `why` is the firm's reason in one line, or null when none was found.
+- `why_basis` is "reported" (an article gives the reason) or "inferred" (the timing ties it to an event, such as results).
+- `why_source` and `why_url` are the article.
+- The update copies these from the kept table, `UI/asset/<slug>_page/analyst_table.json`, and searches nothing itself. Each row there is keyed by `"<date>|<firm>|<rating>|<previous>"`.
+
+The Analysts group in `ratios` has `"id": "analysts"`; the page adds its button to the rating changes page there.
 
 **Item:** `{label, value, fmt, note?, hint?}`
 - `note` shows under the value; `hint` shows under the label.
 - `value` is null when unknown, and the page shows "—".
 
-**Group:** `{title, note?, items: [item]}`
+**Group:** `{title, id?, note?, items: [item]}`
 
 ## Formats (`fmt`)
 

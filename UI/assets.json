@@ -7,16 +7,10 @@
       "added": "2026-11-19"
     },
     {
-      "ticker": "RIOT",
-      "name": "Riot Platforms, Inc.",
-      "pipeline": "asset/riot_page/update_riot_page.py",
-      "added": "2026-11-19"
-    },
-    {
-      "ticker": "NVDA",
-      "name": "NVIDIA Corporation",
-      "pipeline": "asset/nvda_page/update_nvda_page.py",
-      "added": "2026-11-19"
+      "ticker": "OKTA",
+      "name": "Okta, Inc.",
+      "pipeline": "asset/okta_page/update_okta_page.py",
+      "added": "2026-11-20"
     }
   ]
 }

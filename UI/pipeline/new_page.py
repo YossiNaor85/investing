@@ -37,8 +37,13 @@ EDGE_PATHS = [
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
 ]
 
-# Starting points for comparison series. They're suggestions: the skill picks
-# what actually moves the stock (see references/compare-series.md).
+# Rules for comparison series. The UI's Add asset button uses them as they are
+# (create --auto: no AI); the asset-page skill treats them as suggestions.
+# Keep them in step with .claude/skills/asset-page/references/compare-series.md.
+DOMAIN_OVERRIDES = [  # (pattern in the business summary, symbol, label, reason); beats Yahoo's labels
+    (r"\bbitcoin mining\b|\bmine bitcoin\b|\bbitcoin miner", "WGMI", "Bitcoin miners (WGMI)",
+     "its business is bitcoin mining"),
+]
 SECTOR_ETF = {
     "Technology": ("XLK", "Technology (XLK)"),
     "Financial Services": ("XLF", "Financials (XLF)"),
@@ -120,19 +125,23 @@ def suggest(info: dict) -> list:
     industry = info.get("industry") or ""
     kind = (info.get("quoteType") or "").upper()
     if kind == "EQUITY":
-        for text, symbol, label in INDUSTRY_ETF:
-            if text in industry:
-                out.append({"symbol": symbol, "label": label, "why": f"its industry ({industry})"})
+        summary = (info.get("longBusinessSummary") or "").lower()
+        for pattern, symbol, label, why in DOMAIN_OVERRIDES:
+            if re.search(pattern, summary):
+                out.append({"symbol": symbol, "label": label, "why": why})
                 break
+        if not out:
+            for text, symbol, label in INDUSTRY_ETF:
+                if text in industry:
+                    out.append({"symbol": symbol, "label": label, "why": f"its industry ({industry})"})
+                    break
         sector = SECTOR_ETF.get(info.get("sector") or "")
         if sector and not out:
             out.append({"symbol": sector[0], "label": sector[1], "why": f"its sector ({info.get('sector')})"})
-        summary = (info.get("longBusinessSummary") or "").lower()
-        for pattern, symbol, label, why in DRIVERS:
+        for pattern, symbol, label, why in DRIVERS:  # at most one driver: the first that matches
             if re.search(pattern, summary) and all(o["symbol"] != symbol for o in out):
                 out.append({"symbol": symbol, "label": label, "why": why})
-    elif kind in ("ETF", "MUTUALFUND"):
-        out.append({"symbol": "QQQ", "label": "Nasdaq 100 (QQQ)", "why": "a second broad market, if the fund is growth-heavy"})
+                break
     return out
 
 
@@ -211,10 +220,11 @@ def cmd_create(args) -> int:
     info = ap.fetch_info(ticker)
     if not info:
         return fail(f"Yahoo has no data for {ticker}")
-    if args.auto and not compare:  # no judgment available: take the suggestions as they are
+    if args.auto and not compare:  # fixed rules, no judgment: the UI's Add asset path
+        why.setdefault("SPY", "the market")
         for s in suggest(info):
             compare[s["symbol"]] = s["label"]
-            why[s["symbol"]] = s["why"] + " (suggested automatically; not reviewed)"
+            why[s["symbol"]] = s["why"]
     market = (args.market or old.get("market") or "SPY").upper()
     if market not in compare:
         compare = {market: ap.MARKET_LABELS.get(market, market), **compare}
@@ -260,6 +270,7 @@ def cmd_create(args) -> int:
         "script_created": script_created,
         "registered_position": [e["ticker"] for e in entries].index(ticker) + 1,
         "compare": compare,
+        "why": why,
         "first_update": output,
         "link": f"http://127.0.0.1:8765/#{ticker}",
     }, indent=2, ensure_ascii=False))
@@ -297,9 +308,10 @@ def cmd_check(args) -> int:
     if edge and not args.no_screenshots:
         out_dir = ui / "data" / "_checks"
         out_dir.mkdir(parents=True, exist_ok=True)
-        # The first page, the graphs (1 year and 1 day) and the ratios page.
+        # The first page, the graphs (1 year and 1 day), the ratios and the analyst rating changes.
         views = [("overview", "", "1280,900"), ("graphs-1Y", "/graphs/1Y", "1280,1500"),
-                 ("graphs-1D", "/graphs/1D", "1280,1500"), ("ratios", "/ratios", "1280,1300")]
+                 ("graphs-1D", "/graphs/1D", "1280,1500"), ("ratios", "/ratios", "1280,1300"),
+                 ("ratings", "/ratings", "1280,1300")]
         for name, route, size in views:
             out = out_dir / f"{ticker}-{name}.png"
             url = (ui / "index.html").as_uri() + f"#{ticker}{route}"
@@ -371,7 +383,8 @@ def cmd_delete(args) -> int:
     ap.save_registry(ui, [e for e in entries if e["ticker"] != ticker])
     removed = []
     data_dir = ui / "data"
-    for path in [data_dir / f"{ticker}.js", data_dir / f"{ticker}.json", *(data_dir / "_checks").glob(f"{ticker}-*.png")]:
+    for path in [data_dir / f"{ticker}.js", data_dir / f"{ticker}.json",
+                 *(data_dir / "_checks").glob(f"{ticker}-*.png"), *(data_dir / "_causes").glob(f"{ticker}.*")]:
         if path.exists():
             path.unlink()
             removed.append(path.name)
@@ -429,7 +442,7 @@ def main() -> int:
     p.add_argument("--new-script", action="store_true",
                    help="also rewrite the update script from the template (replaces any customize() code)")
     p.add_argument("--auto", action="store_true",
-                   help="with no --compare: use the suggested series as they are (the UI's fallback without Claude)")
+                   help="with no --compare: pick the series by the fixed rules above (what the UI's Add asset runs)")
     p.set_defaults(func=cmd_create)
 
     p = sub.add_parser("check", help="validate an asset's data and screenshot its page")

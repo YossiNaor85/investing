@@ -2,8 +2,12 @@ r"""Shared engine for the asset pages of the investing UI.
 
 Every followed asset has a folder UI/asset/<slug>_page/ containing:
 
-    config.json              the asset's settings: comparison series and why
-    update_<slug>_page.py    its pipeline entry point, which calls main() below
+    config.json                 the asset's settings: comparison series and why
+    update_<slug>_page.py       its pipeline entry point, which calls main() below
+    analyst_table.json          the analyst table with each change's reason (stocks).
+                                UI/pipeline/rating_causes.py and the
+                                rating_change_cause_searcher skill keep it; the
+                                pipeline only reads it.
 
 The pipeline fetches prices and company data from Yahoo Finance (through
 yfinance), computes financial ratios and econometric measures, and writes:
@@ -400,7 +404,7 @@ def company_ratios(info: dict, current: float, ticker: str) -> list:
             item("Held by institutions", g("heldPercentInstitutions"), "pct"),
             item("Held by insiders", g("heldPercentInsiders"), "pct"),
         ]},
-        {"title": "Analysts", "items": [
+        {"title": "Analysts", "id": "analysts", "items": [
             item("Consensus", rec_text, "text"),
             item("Analysts", g("numberOfAnalystOpinions"), "int"),
             item("Mean price target", target, "money"),
@@ -449,9 +453,101 @@ def basic_ratios(info: dict) -> list:
     ]}]
 
 
+# -------------------------------------------- analyst rating changes + why
+
+# The analyst table is kept in the asset's folder, in this file, with the firm's reason
+# for each change. It's the table as of the last search for reasons: on Refresh, Yahoo's
+# table is compared with it, and only new changes go to the rating_change_cause_searcher
+# skill (UI/pipeline/rating_causes.py keeps the file). The update below only reads it.
+# A change is a new rating or a new price target; a plain reiteration needs no reason.
+KEPT_TABLE = "analyst_table.json"
+ACTIONS = {"up": "upgrade", "down": "downgrade", "init": "new coverage", "main": "maintained", "reit": "reiterated"}
+
+
+def _text(value) -> str:
+    """A cell as text: '' for None and NaN."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return ""
+    return str(value).strip()
+
+
+def needs_reason(row: dict) -> bool:
+    """True when the firm changed its rating or its price target."""
+    return bool(row.get("rating_changed") or row.get("target_changed"))
+
+
+def rating_changes(ticker: str, days: int = 365) -> Optional[dict]:
+    """Yahoo's analyst updates of the past `days` days, newest first, as {"since", "rows"}.
+    A row's id, "<date>|<firm>|<rating>|<previous>", keys it in the kept table.
+    None when Yahoo has none."""
+    try:
+        df = yf.Ticker(ticker).upgrades_downgrades
+    except Exception:
+        return None
+    if df is None or df.empty:
+        return None
+    index = pd.to_datetime(df.index)
+    if index.tz is not None:
+        index = index.tz_convert(None)
+    since = pd.Timestamp.now() - pd.Timedelta(days=days)
+    df = df.set_axis(index)
+    df = df[df.index >= since].sort_index(ascending=False)
+    rows = []
+    for ts, r in df.iterrows():
+        firm, rating, previous = _text(r.get("Firm")), _text(r.get("ToGrade")), _text(r.get("FromGrade"))
+        action = _text(r.get("Action"))
+        target = number(r.get("currentPriceTarget")) or None      # 0 means none
+        prior = number(r.get("priorPriceTarget")) or None
+        rows.append({
+            "id": f"{ts:%Y-%m-%d}|{firm}|{rating}|{previous}",
+            "date": f"{ts:%Y-%m-%d}",
+            "firm": firm,
+            "action": ACTIONS.get(action.lower(), action or None),
+            "rating": rating or None,
+            "previous": previous or None,
+            "prior_target": prior,
+            "target": target,
+            "rating_changed": rating != previous,  # an upgrade, downgrade or new coverage
+            "target_changed": bool(target and prior and target != prior),
+        })
+    return {"since": f"{since:%Y-%m-%d}", "rows": rows}
+
+
+def load_kept(path: Path) -> dict:
+    """An asset's kept analyst table as {id: row}; empty when there's none yet."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig")).get("rows") or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def analyst_actions(ticker: str, kept_path: Path) -> Optional[dict]:
+    """Analyst updates of the past year, newest first. Each change of rating or target
+    gets its reason from the kept table. Nothing is searched here, so an update stays
+    quick and calls no AI. Changes not looked into yet count as pending."""
+    table = rating_changes(ticker)
+    if not table:
+        return None
+    kept = load_kept(kept_path)
+    rows = []
+    for yahoo_row in table["rows"]:
+        row = {k: v for k, v in yahoo_row.items() if k != "id"}
+        if needs_reason(row):
+            entry = kept.get(yahoo_row["id"]) or {}
+            row["searched"] = bool(entry.get("searched"))
+            if row["searched"]:
+                row.update(why=entry.get("cause"), why_basis=entry.get("basis"),
+                           why_source=entry.get("source"), why_url=entry.get("url"))
+        rows.append(row)
+    return {"since": table["since"], "rows": rows,
+            "changes": sum(1 for r in rows if needs_reason(r)),
+            "pending": sum(1 for r in rows if r.get("searched") is False)}
+
+
 # ------------------------------------------------------------------- build
 
-def build(cfg: dict, customize: Optional[Customize] = None) -> dict:
+def build(cfg: dict, customize: Optional[Customize] = None, page_dir: Optional[Path] = None) -> dict:
+    """The page's data. page_dir is the asset's folder, where its analyst table is kept."""
     ticker = cfg["ticker"]
     market = cfg.get("market", "SPY")
     compare = dict(cfg.get("compare") or {})
@@ -641,6 +737,10 @@ def build(cfg: dict, customize: Optional[Customize] = None) -> dict:
         "econometrics": econ,
         "warnings": warnings,
     }
+    if kind == "EQUITY" and page_dir is not None:
+        actions = analyst_actions(ticker, page_dir / KEPT_TABLE)
+        if actions:
+            data["analyst_actions"] = actions
     if customize:
         ctx = {"config": cfg, "info": info, "history": hist, "intraday": day, "compare": compare_close}
         data = customize(data, ctx) or data
@@ -669,10 +769,11 @@ def load_config(path: Path) -> dict:
     return cfg
 
 
-def run_once(cfg: dict, ui_dir: Path, customize: Optional[Customize] = None) -> bool:
+def run_once(cfg: dict, ui_dir: Path, customize: Optional[Customize] = None,
+             page_dir: Optional[Path] = None) -> bool:
     ticker = cfg["ticker"]
     try:
-        data = build(cfg, customize)
+        data = build(cfg, customize, page_dir)
     except Exception as exc:  # keep the last good files on any failure
         print(f"{datetime.now():%H:%M:%S} {ticker}: update failed, previous data kept: {exc}", file=sys.stderr)
         return False
@@ -684,6 +785,14 @@ def run_once(cfg: dict, ui_dir: Path, customize: Optional[Customize] = None) -> 
           f"1Y {len(data['series']['1Y']['points'])} bars · "
           f"1D {len(one_day.get('points', []))} bars ({one_day.get('session', 'n/a')}) · "
           f"{len(data['warnings'])} warnings → {target}")
+    actions = data.get("analyst_actions")
+    if actions:
+        found = sum(1 for r in actions["rows"] if r.get("why"))
+        line = (f"  analyst updates, past year: {len(actions['rows'])}; "
+                f"changes of rating or target: {actions['changes']}, {found} with a reason")
+        if actions["pending"]:
+            line += f"; {actions['pending']} not looked into yet (the rating_change_cause_searcher skill does that)"
+        print(line)
     for w in data["warnings"]:
         print(f"  warning: {w}")
     return True
@@ -708,11 +817,11 @@ def main(config_path, customize: Optional[Customize] = None) -> int:
     if args.ticker and args.ticker.upper() != cfg["ticker"]:
         parser.error(f"this script updates {cfg['ticker']}, not {args.ticker.upper()}")
     if not args.every:
-        return 0 if run_once(cfg, ui_dir, customize) else 1
+        return 0 if run_once(cfg, ui_dir, customize, config_path.parent) else 1
     print(f"Updating {cfg['ticker']} every {args.every:g} minutes. Press Ctrl+C to stop.")
     try:
         while True:
-            run_once(cfg, ui_dir, customize)
+            run_once(cfg, ui_dir, customize, config_path.parent)
             time.sleep(args.every * 60)
     except KeyboardInterrupt:
         return 0

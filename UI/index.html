@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Investing</title>
-  <link rel="stylesheet" href="static/styles.css?v=5">
+  <link rel="stylesheet" href="static/styles.css?v=8">
   <script>
     // Apply a saved theme before the first paint (Auto follows the system setting).
     try {
@@ -39,7 +39,6 @@
         <strong id="notice-title"></strong>
         <button id="notice-close" class="btn btn-ghost btn-small" type="button">Dismiss</button>
       </div>
-      <p id="notice-via" class="muted small"></p>
       <div id="notice-text" class="notice-text"></div>
     </section>
 
@@ -58,6 +57,8 @@
       <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden>
         <a id="crumb-asset" href="#"></a>
         <span class="crumb-sep" aria-hidden="true">›</span>
+        <a id="crumb-parent" href="#" hidden></a>
+        <span id="crumb-parent-sep" class="crumb-sep" aria-hidden="true" hidden>›</span>
         <span id="crumb-current" aria-current="page"></span>
       </nav>
 
@@ -120,6 +121,19 @@
         </section>
       </section>
 
+      <!-- Analyst rating changes: opened from the Analysts box on the fundamental ratios page -->
+      <section id="view-ratings" class="view" hidden>
+        <section id="analyst-card" class="card wide-card">
+          <h2>Analyst rating changes · past year</h2>
+          <p id="analyst-sub" class="muted small"></p>
+          <div id="analyst-table" class="table-wrap table-page"></div>
+        </section>
+        <section id="analyst-none" class="card placeholder" hidden>
+          <h2>No analyst rating changes</h2>
+          <p class="muted">Yahoo lists none for this asset over the past year.</p>
+        </section>
+      </section>
+
       <!-- News, Info and Connect the dots: empty for now -->
       <section id="view-empty" class="view" hidden>
         <section class="card placeholder">
@@ -133,6 +147,6 @@
     </section>
   </main>
 
-  <script src="static/app.js?v=5"></script>
+  <script src="static/app.js?v=8"></script>
 </body>
 </html>

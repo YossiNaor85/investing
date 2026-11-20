@@ -1,20 +1,26 @@
-r"""Serve the investing UI on this computer, and run its pipelines on demand.
+r"""Serve the investing UI on this computer, and run its scripts on demand.
 
     .venv\Scripts\python.exe UI\server.py           # http://127.0.0.1:8765/
     .venv\Scripts\python.exe UI\server.py --open    # ...and open it in the browser
 
-The page calls three endpoints:
+Every button runs a plain Python script here:
 
-    POST /api/refresh?ticker=IREN   run the asset's pipeline (listed in UI/assets.json)
-    POST /api/assets?ticker=RIOT    add an asset: restore it if it was deleted before, otherwise
-                                    run the asset-page skill headless (claude -p "/asset-page RIOT")
-    DELETE /api/assets?ticker=RIOT  delete an asset (UI/pipeline/new_page.py delete): off the list,
-                                    folder archived to UI/asset/_deleted/, data files removed
-    GET  /api/status?ticker=RIOT[&job=add]   progress of a refresh or an add
+    POST   /api/refresh?ticker=IREN  run the asset's pipeline (listed in UI/assets.json)
+    POST   /api/assets?ticker=RIOT   add an asset with UI/pipeline/new_page.py: restore it if it
+                                     was deleted before, otherwise create it (create --auto)
+    DELETE /api/assets?ticker=RIOT   delete it (new_page.py delete): off the list, folder archived
+                                     to UI/asset/_deleted/, data files removed
+    GET    /api/status?ticker=RIOT[&job=add|causes]   progress of a refresh, an add or a reason search
 
-Without the claude command, adding falls back to UI/pipeline/new_page.py with
-its suggested comparison series. The server listens on 127.0.0.1 only, so no
-other computer can reach it. It serves only the page, its static files and data/.
+After a refresh or an add, the server compares the asset's analyst table with the one
+kept in its folder (UI/pipeline/rating_causes.py diff, a plain script). Only when there
+are new changes of rating or price target does it start AI: Claude Code runs the
+rating_change_cause_searcher skill in the background on just those changes, allowed
+only web research and the skill's own script and working folder. AUTO_REASONS below
+turns this off.
+
+The server listens on 127.0.0.1 only, so no other computer can reach it.
+It serves only the page, its static files and data/.
 """
 from __future__ import annotations
 
@@ -36,14 +42,34 @@ from urllib.parse import parse_qs, urlparse
 UI_DIR = Path(__file__).resolve().parent
 REPO_DIR = UI_DIR.parent
 NEW_PAGE = UI_DIR / "pipeline" / "new_page.py"
+CAUSES = UI_DIR / "pipeline" / "rating_causes.py"
+WORK_DIR = UI_DIR / "data" / "_causes"
 TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,12}$")
 REFRESH_TIMEOUT_S = 300
-ADD_TIMEOUT_S = 900
+ADD_TIMEOUT_S = 300
 SERVED = ("/", "/index.html", "/static/", "/data/")
+
+# The reason search behind new analyst changes (rating or price target).
+AUTO_REASONS = True             # False: refreshes never start AI; run the skill by hand instead
+DIFF_TIMEOUT_S = 900            # the diff also fetches free news headlines for each new change
+REASONS_TIMEOUT_S = 3600        # a first search for a newly added stock can take a while
+BUDGET_PER_CHANGE_USD = 0.5     # spending cap for one search: this much per change...
+BUDGET_MIN_USD, BUDGET_MAX_USD = 2.0, 30.0  # ...within these bounds
+REASON_TOOLS = [                # all the background run may use; anything else is refused
+    "Skill", "Read", "Glob", "Grep", "WebSearch", "WebFetch", "Agent",
+    "Write(UI/data/_causes/**)", "Edit(UI/data/_causes/**)",
+    "Bash(.venv/Scripts/python.exe UI/pipeline/rating_causes.py *)",
+    "PowerShell(.venv/Scripts/python.exe UI/pipeline/rating_causes.py *)",
+    "PowerShell(.\\.venv\\Scripts\\python.exe UI\\pipeline\\rating_causes.py *)",
+]
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def slug(ticker: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", ticker.lower()).strip("_")
 
 
 def pipeline_for(ticker: str) -> Optional[Path]:
@@ -60,6 +86,11 @@ def pipeline_for(ticker: str) -> Optional[Path]:
     return None
 
 
+def archived(ticker: str) -> bool:
+    """True if a deleted copy of this asset's page is waiting in UI/asset/_deleted/."""
+    return any((UI_DIR / "asset" / "_deleted").glob(f"{slug(ticker)}_page-*"))
+
+
 def run(cmd: list, timeout: int) -> tuple:
     """(exit code, stdout, stderr) of a command run from the repo root."""
     proc = subprocess.run(cmd, cwd=str(REPO_DIR), capture_output=True, timeout=timeout,
@@ -67,56 +98,110 @@ def run(cmd: list, timeout: int) -> tuple:
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
 
 
-def refresh_job(script: Path) -> Callable[[], dict]:
+def claude_cli() -> Optional[str]:
+    """Claude Code's command line; on Windows the native claude.exe, not the npm .cmd shim."""
+    return shutil.which("claude.exe") or shutil.which("claude")
+
+
+def diff(ticker: str, news: bool = True) -> dict:
+    """The asset's analyst table compared with the kept one: rating_causes.py diff's summary."""
+    cmd = [sys.executable, str(CAUSES), "diff", ticker] + ([] if news else ["--no-news"])
+    code, out, err = run(cmd, DIFF_TIMEOUT_S)
+    try:
+        return json.loads(out)["assets"][0]
+    except (ValueError, KeyError, IndexError):
+        raise RuntimeError((err or out).strip()[-300:] or f"exit code {code}")
+
+
+def reasons_job(ticker: str) -> Callable[[], dict]:
+    """Compare the analyst table with the kept one (a plain script). When there are new
+    changes, have the rating_change_cause_searcher skill find their reasons (AI), then
+    report how many it explained."""
+    def work() -> dict:
+        todo = diff(ticker).get("to_explain") or 0
+        if not todo:
+            return {"state": "done", "to_explain": 0, "explained": 0, "message": "no new analyst changes"}
+        cli = claude_cli()
+        if not cli:
+            return {"state": "error", "to_explain": todo, "message": "Claude Code isn't installed on this computer"}
+        JOBS.note(f"causes:{ticker}", phase="searching", to_explain=todo)
+        budget = min(BUDGET_MAX_USD, max(BUDGET_MIN_USD, BUDGET_PER_CHANGE_USD * todo))
+        prompt = (f"Use the rating_change_cause_searcher skill for {ticker}. It runs unattended in the background, "
+                  "started by the investing UI after a refresh: ask no questions, and finish by saving the reasons.")
+        cmd = [cli, "-p", prompt, "--permission-mode", "dontAsk", "--allowedTools", *REASON_TOOLS,
+               "--output-format", "json", "--max-budget-usd", f"{budget:.2f}", "--no-session-persistence"]
+        code, out, err = run(cmd, REASONS_TIMEOUT_S)
+        try:
+            result = json.loads(out)
+        except ValueError:
+            result = {"is_error": True, "result": (err or out).strip()[-500:]}
+        WORK_DIR.mkdir(parents=True, exist_ok=True)
+        with (WORK_DIR / f"{ticker}.log").open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"at": now(), "to_explain": todo, "exit": code, "cost_usd": result.get("total_cost_usd"),
+                                  "turns": result.get("num_turns"), "result": result.get("result")}, ensure_ascii=False) + "\n")
+        left = diff(ticker, news=False).get("to_explain") or 0
+        explained = max(0, todo - left)
+        if code != 0 or result.get("is_error"):
+            message = f"stopped with {left} of {todo} changes still to explain"
+            return {"state": "error", "to_explain": todo, "explained": explained, "left": left, "message": message}
+        return {"state": "done", "to_explain": todo, "explained": explained, "left": left,
+                "message": f"explained {explained} of {todo} new analyst changes"}
+    return work
+
+
+def start_reasons(ticker: str) -> Optional[str]:
+    """Start the reason search for an asset, unless it's turned off: "started", "running" or None."""
+    if not AUTO_REASONS:
+        return None
+    return "started" if JOBS.start(f"causes:{ticker}", reasons_job(ticker)) else "running"
+
+
+def refresh_job(script: Path, ticker: str) -> Callable[[], dict]:
     def work() -> dict:
         code, out, err = run([sys.executable, str(script)], REFRESH_TIMEOUT_S)
         out_lines, err_lines = out.strip().splitlines(), err.strip().splitlines()
         if code == 0:
-            return {"state": "done", "message": out_lines[-1] if out_lines else "updated"}
+            return {"state": "done", "message": out_lines[-1] if out_lines else "updated",
+                    "causes": start_reasons(ticker)}
         return {"state": "error", "message": err_lines[-1] if err_lines else f"exit code {code}"}
     return work
 
 
-def archived(ticker: str) -> bool:
-    """True if a deleted copy of this asset's page is waiting in UI/asset/_deleted/."""
-    slug = re.sub(r"[^a-z0-9]+", "_", ticker.lower()).strip("_")
-    return any((UI_DIR / "asset" / "_deleted").glob(f"{slug}_page-*"))
+def describe(result: dict, ticker: str) -> str:
+    """A short report of what new_page.py did, for the page's notice."""
+    if result.get("restored"):
+        return f"{ticker} is back, with the comparison series and settings it had before it was deleted."
+    why = result.get("why") or {}
+    series = "; ".join(label + (f" ({why[s]})" if why.get(s) else "")
+                       for s, label in (result.get("compare") or {}).items())
+    lines = [f"{result.get('name') or ticker} added."]
+    if series:
+        lines.append(f"Compared with: {series}.")
+    lines.append(f"To change the comparison series, edit UI/asset/{slug(ticker)}_page/config.json and press Refresh.")
+    return "\n".join(lines)
 
 
 def add_job(ticker: str) -> Callable[[], dict]:
+    """Add an asset with plain scripts: restore a deleted copy if there is one, otherwise
+    create the page with comparison series picked by new_page.py's fixed rules."""
     def work() -> dict:
-        claude = shutil.which("claude")
-        if archived(ticker):  # it was deleted before: bring back its page and settings
-            via = "restoring its earlier page and settings"
-            code, out, err = run([sys.executable, str(NEW_PAGE), "restore", ticker], ADD_TIMEOUT_S)
-            try:
-                result = json.loads(out)
-                message = f"{ticker} is back, with the comparison series and settings it had before it was deleted."
-                failed = not result.get("ok")
-                if failed:
-                    message = result.get("error") or "\n".join(result.get("first_update") or [])
-            except ValueError:
-                message, failed = (out.strip() or err.strip())[-3000:], True
-        elif claude:
-            via = "the asset-page skill (Claude Code, headless)"
-            code, out, err = run([claude, "-p", f"/asset-page {ticker}", "--permission-mode", "dontAsk",
-                                  "--output-format", "json", "--max-turns", "40"], ADD_TIMEOUT_S)
-            try:
-                result = json.loads(out)
-                message = str(result.get("result") or "").strip()
-                failed = bool(result.get("is_error")) or code != 0
-            except ValueError:
-                message = (out.strip() or err.strip())[-3000:]
-                failed = code != 0
+        if archived(ticker):
+            via = "the page builder script (restored from your deleted assets)"
+            cmd = [sys.executable, str(NEW_PAGE), "restore", ticker]
         else:
-            via = ("the scaffolder alone, because the claude command wasn't found. The comparison series are "
-                   f"unreviewed suggestions; run /asset-page {ticker} --rebuild in Claude Code to have them chosen")
-            code, out, err = run([sys.executable, str(NEW_PAGE), "create", ticker, "--auto"], ADD_TIMEOUT_S)
-            message = (out.strip() or err.strip())[-3000:]
-            failed = code != 0
+            via = "the page builder script (fixed rules, no AI)"
+            cmd = [sys.executable, str(NEW_PAGE), "create", ticker, "--auto"]
+        code, out, err = run(cmd, ADD_TIMEOUT_S)
+        try:
+            result = json.loads(out)
+        except ValueError:
+            result = {"ok": False, "error": (out.strip() or err.strip())[-3000:] or f"exit code {code}"}
         added = pipeline_for(ticker) is not None
-        state = "done" if added else ("error" if failed else "stopped")
-        return {"state": state, "added": added, "via": via, "message": message or f"exit code {code}"}
+        if result.get("ok") and added:
+            return {"state": "done", "added": True, "via": via, "message": describe(result, ticker),
+                    "causes": start_reasons(ticker)}
+        message = result.get("error") or "\n".join(result.get("first_update") or []) or f"exit code {code}"
+        return {"state": "error", "added": added, "via": via, "message": message}
     return work
 
 
@@ -134,6 +219,12 @@ class Jobs:
     def busy(self, prefix: str) -> bool:
         with self.lock:
             return any(k.startswith(prefix) and v.get("state") == "running" for k, v in self.status.items())
+
+    def note(self, key: str, **fields) -> None:
+        """Add progress details to a running job's status."""
+        with self.lock:
+            if key in self.status:
+                self.status[key].update(fields)
 
     def start(self, key: str, work: Callable[[], dict]) -> bool:
         with self.lock:
@@ -156,8 +247,11 @@ class Jobs:
             self.status[key] = dict(self.status.get(key, {}), finished_at=now(), **result)
 
 
+JOBS = Jobs()
+
+
 class Handler(SimpleHTTPRequestHandler):
-    jobs = Jobs()
+    jobs = JOBS
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(UI_DIR), **kwargs)
@@ -204,7 +298,8 @@ class Handler(SimpleHTTPRequestHandler):
             ticker = self._ticker()
             if not ticker:
                 return self._json(400, {"error": "bad ticker"})
-            job = "add" if (self._query().get("job") or [""])[0] == "add" else "refresh"
+            asked = (self._query().get("job") or [""])[0]
+            job = asked if asked in ("add", "causes") else "refresh"
             return self._json(200, dict(self.jobs.get(f"{job}:{ticker}"), ticker=ticker, job=job,
                                         registered=pipeline_for(ticker) is not None))
         if not (path in SERVED[:2] or path.startswith(SERVED[2:])):
@@ -217,16 +312,16 @@ class Handler(SimpleHTTPRequestHandler):
         if not self._local() or self.headers.get("X-Requested-With") != "investing-ui":
             return self._json(403, {"error": "only the investing UI on this computer can do that"})
         path = urlparse(self.path).path
-        ticker = self._ticker()
         if path not in ("/api/refresh", "/api/assets"):
             return self._json(404, {"error": "not found"})
+        ticker = self._ticker(required=True)
         if not ticker:
             return self._json(400, {"error": "bad ticker: use letters, digits, '.' or '-', e.g. NVDA, BRK-B, TEVA.TA"})
         if path == "/api/refresh":
             script = pipeline_for(ticker)
             if not script:
                 return self._json(404, {"error": f"{ticker} isn't in Your assets; add it first"})
-            started = self.jobs.start(f"refresh:{ticker}", refresh_job(script))
+            started = self.jobs.start(f"refresh:{ticker}", refresh_job(script, ticker))
             return self._json(202 if started else 409, dict(self.jobs.get(f"refresh:{ticker}"), ticker=ticker))
         if pipeline_for(ticker):
             return self._json(409, {"error": f"{ticker} is already in Your assets", "registered": True, "ticker": ticker})
@@ -245,7 +340,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json(400, {"error": "say which asset to delete: ?ticker=..."})
         if not pipeline_for(ticker):
             return self._json(404, {"error": f"{ticker} isn't in Your assets"})
-        if any(self.jobs.get(f"{job}:{ticker}").get("state") == "running" for job in ("refresh", "add")):
+        if any(self.jobs.get(f"{job}:{ticker}").get("state") == "running" for job in ("refresh", "add", "causes")):
             return self._json(409, {"error": f"{ticker} is updating right now; try again when it finishes"})
         code, out, err = run([sys.executable, str(NEW_PAGE), "delete", ticker], 60)
         try:
@@ -276,8 +371,9 @@ def main() -> int:
             webbrowser.open(url)
         return 0
     print(f"Investing UI: {url}")
-    print(f"Adding assets runs: {shutil.which('claude') or 'the scaffolder only (claude command not found)'}")
-    print("Keep this window open while you use the page. Close it, or press Ctrl+C, to stop.")
+    print("Buttons run Python scripts. After a refresh, only new analyst changes go to Claude for their")
+    print("reasons, in the background. Keep this window open while you use the page;")
+    print("close it, or press Ctrl+C, to stop.")
     if args.open:
         threading.Timer(0.6, webbrowser.open, args=(url,)).start()
     try:

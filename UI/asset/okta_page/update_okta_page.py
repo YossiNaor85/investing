@@ -1,16 +1,16 @@
-r"""Pipeline for the RIOT page of the investing UI (Riot Platforms, Inc.).
+r"""Pipeline for the OKTA page of the investing UI (Okta, Inc.).
 
-Fetches the latest data for RIOT and rewrites UI/data/RIOT.js and .json,
-which UI/index.html#RIOT shows. The shared engine in UI/pipeline/asset_page.py
+Fetches the latest data for OKTA and rewrites UI/data/OKTA.js and .json,
+which UI/index.html#OKTA shows. The shared engine in UI/pipeline/asset_page.py
 does the work; this asset's settings are in config.json next to this file.
 
 Run from the repo root:
 
-    .venv\Scripts\python.exe UI\asset\riot_page\update_riot_page.py             # one update
-    .venv\Scripts\python.exe UI\asset\riot_page\update_riot_page.py --every 15  # every 15 minutes until stopped
+    .venv\Scripts\python.exe UI\asset\okta_page\update_okta_page.py             # one update
+    .venv\Scripts\python.exe UI\asset\okta_page\update_okta_page.py --every 15  # every 15 minutes until stopped
 
 The page's Refresh button runs this script through UI/server.py.
-Created by the asset-page skill on 2026-11-19.
+Created by the asset-page skill on 2026-11-20.
 """
 import sys
 from pathlib import Path
@@ -24,7 +24,7 @@ from pipeline import asset_page  # noqa: E402
 
 
 def customize(data: dict, ctx: dict) -> dict:
-    """Changes for RIOT only. Runs after the standard build; return the data.
+    """Changes for OKTA only. Runs after the standard build; return the data.
 
     ctx holds "config", "info" (Yahoo's company data), "history" (2 years of
     daily bars), "intraday" (the latest session's 1-minute bars) and "compare"

@@ -270,7 +270,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; transition: o
 .crumbs a:hover { text-decoration: underline; }
 .crumb-sep { color: var(--text-muted); }
 
-.boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; margin-top: 20px; }
+.boxes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+@media (max-width: 900px) { .boxes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .boxes { grid-template-columns: 1fr; } }
 .box {
   display: flex; flex-direction: column; gap: 8px; min-height: 180px; padding: 16px 18px;
   background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
@@ -297,6 +299,19 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; transition: o
 .groups-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); column-gap: 32px; }
 .groups-grid .group, .groups-grid .group + .group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--grid); }
 .placeholder { text-align: center; padding: 56px 20px; margin-top: 20px; }
+
+.table-tall { max-height: 560px; }
+.table-page { max-height: calc(100vh - 220px); min-height: 320px; }
+.group-link { display: inline-block; margin-top: 12px; text-decoration: none; }
+.analyst-table th, .analyst-table td { vertical-align: top; }
+.analyst-table td.why { white-space: normal; min-width: 300px; }
+.why-source, .rating-action { display: block; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+.why-source a { color: var(--text-secondary); }
+.why-source a:hover { color: var(--text-primary); }
+.inferred { font-weight: 600; color: var(--text-secondary); }
+.rating { font-weight: 600; }
+.nowrap { white-space: nowrap; }
+#analyst-sub { margin-top: 4px; }
 .placeholder h2 { margin-bottom: 6px; }
 
 /* ---------- ratio panels */

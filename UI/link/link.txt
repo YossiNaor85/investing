@@ -14,7 +14,8 @@ Pages of each asset:
     #IREN                 its first page, with a box for each section
     #IREN/graphs/1Y       graphs (also /3M and /1D)
     #IREN/ratios          fundamental ratios
-    #IREN/news, #IREN/info, #IREN/analyst   empty for now
+    #IREN/ratings         analyst rating changes, with the reasons
+    #IREN/news, #IREN/info, #IREN/analyst, #IREN/sentiment   empty for now
 
 The page reads UI\data\, which each asset's pipeline writes (IREN's is
 UI\asset\iren_page\update_iren_page.py). The Refresh button runs the current asset's
@@ -22,9 +23,20 @@ pipeline through UI\server.py.
 
 Add an asset:
     In the page: Your assets > + Add asset, type the ticker, Add. The server runs
-    the asset-page skill (claude -p "/asset-page TICKER") in the background.
-    Or in Claude Code: /asset-page TICKER.
+    UI\pipeline\new_page.py (a Python script, no AI). Comparison series come from
+    fixed rules; change them in UI\asset\<ticker>_page\config.json.
+    Or in Claude Code, /asset-page TICKER lets Claude choose them.
 
 Delete an asset: Your assets > the ✕ next to it. Its folder moves to UI\asset\_deleted\.
     Bring it back: .venv\Scripts\python.exe UI\pipeline\new_page.py restore TICKER
 The skill lives in .claude\skills\asset-page\ and uses UI\pipeline\new_page.py.
+
+Analyst rating changes (#IREN/ratings, the button in the Analysts box on #IREN/ratios):
+    Every analyst update of the past year, newest first, with the firm's reason for each
+    change of rating or price target. The table is kept in
+    UI\asset\<ticker>_page\analyst_table.json. On Refresh, the server compares Yahoo's
+    table with it; only when there are new changes does it start Claude in the background
+    (the rating_change_cause_searcher skill) on just those, then adds their reasons.
+    Adding an asset does the same for its whole past year. The page tells you while the
+    search runs. By hand in Claude Code: /rating_change_cause_searcher IREN.
+    To stop refreshes from starting Claude, set AUTO_REASONS = False in UI\server.py.

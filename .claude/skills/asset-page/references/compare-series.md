@@ -2,6 +2,8 @@
 
 The page measures beta (sensitivity) and correlation against each comparison series. Pick the series that move the stock; they can differ from what Yahoo's labels suggest.
 
+The UI's **Add asset** button picks them without AI, by fixed rules in `UI/pipeline/new_page.py`: `DOMAIN_OVERRIDES`, `INDUSTRY_ETF`, `SECTOR_ETF` and `DRIVERS`. Keep those tables in step with this guide. A case Claude gets right by judgment can often become a rule there, the way bitcoin miners map to WGMI.
+
 ## The three slots
 
 | Slot | What it is | Default |

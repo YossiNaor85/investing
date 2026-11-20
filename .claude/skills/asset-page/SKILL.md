@@ -16,6 +16,7 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 |---|---|
 | `UI/asset/<slug>_page/config.json` | the asset's settings: its comparison series, and why each matters |
 | `UI/asset/<slug>_page/update_<slug>_page.py` | its pipeline: it calls the shared engine `UI/pipeline/asset_page.py`, and has a `customize()` hook for changes only this asset needs |
+| `UI/asset/<slug>_page/analyst_table.json` | the kept analyst table, with each change's reason (stocks). `rating_change_cause_searcher` and `UI/pipeline/rating_causes.py` keep it; the pipeline only reads it. |
 | `UI/assets.json` | "Your assets", in order (IREN first) |
 | `UI/data/<TICKER>.js` and `.json` | the page's data, rewritten by every run (git-ignored) |
 
@@ -26,7 +27,8 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 | `#<TICKER>` | the asset's first page: headline tiles, plus a box for each section |
 | `#<TICKER>/graphs/1Y` | the graphs (also `/3M` and `/1D`) and the econometric measures |
 | `#<TICKER>/ratios` | the fundamental ratios |
-| `#<TICKER>/news`, `/info`, `/analyst` | empty for now |
+| `#<TICKER>/ratings` | the analyst rating changes of the past year, with reasons; opened from the Analysts box on the ratios page |
+| `#<TICKER>/news`, `/info`, `/analyst`, `/sentiment` | empty for now |
 
 ## Steps
 
@@ -57,21 +59,24 @@ Adds one asset to the investing UI: a page at `UI/index.html#<TICKER>`, plus the
 
    The command registers the asset at the end of Your assets, runs the first update and prints the result. If the update fails, report the error instead of retrying in a loop.
 5. **Check.** Run `.\.venv\Scripts\python.exe UI\pipeline\new_page.py check <TICKER>`, then Read the screenshots it lists and confirm:
-   - the first page shows the five boxes
+   - the first page shows the six boxes
    - the graphs are drawn (1 year and 1 day)
    - the ratios page is filled in
+   - the rating changes page lists the analyst updates (stocks)
    - no labels collide
 
    `empty_values` lists the ratios Yahoo didn't provide. Gaps are normal for ETFs and young companies; tell the user which missing ones matter.
-6. **Report** in a few lines:
+6. **Reasons for the analyst changes.** For a stock, invoke the `rating_change_cause_searcher` skill with the ticker. It finds why each change of rating or price target of the past year happened and keeps the table, with the reasons, in the asset's folder. Every Refresh reads it, and later refreshes send only new changes to the skill. Skip this for ETFs: they have no analyst ratings.
+7. **Report** in a few lines:
    - the link, http://127.0.0.1:8765/#<TICKER>, and the note that `UI\link\start-investing-ui.cmd` starts the server if it isn't running (don't try to check it yourself)
    - the comparison series and why each was picked
    - any warnings, such as currency or missing data
+   - what the reasons show, such as a recent downgrade or a big target cut
    - the files created
 
 ## Rules
 
-- When the UI's **Add asset** button runs this skill (headless, through `UI/server.py`), nobody can answer questions. Wherever a step says to ask, stop instead, and end with a short explanation of what's needed. The UI shows your final message.
+- The UI's **Add asset** button doesn't use this skill or any AI. It runs `new_page.py create <TICKER> --auto` (or `restore`), which picks the comparison series by fixed rules. Use this skill when the user wants Claude to choose the series or customize a page; `--rebuild` with your own `--compare` replaces the automatic choice. Once the page is built, the UI server compares its analyst table with the kept one and starts `rating_change_cause_searcher` in the background for the changes; that's the only AI the buttons start.
 - Only add tickers the user asked for.
 - Don't edit `UI/pipeline/asset_page.py` to suit one asset; that changes every page. One-asset changes go in that asset's `customize()` (see `${CLAUDE_SKILL_DIR}/references/customizing.md`).
 - If you change what the pipeline writes, follow `${CLAUDE_SKILL_DIR}/references/page-contract.md`, and update `UI/static/app.js` in the same change.
